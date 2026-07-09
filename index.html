@@ -824,7 +824,10 @@ function updateBannerLive(n){
    GPS
 ════════════════════════════════════════ */
 function hav(la1,lo1,la2,lo2){const R=6371000,f1=la1*Math.PI/180,f2=la2*Math.PI/180,df=(la2-la1)*Math.PI/180,dl=(lo2-lo1)*Math.PI/180,a=Math.sin(df/2)**2+Math.cos(f1)*Math.cos(f2)*Math.sin(dl/2)**2;return Math.round(R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)));}
-const OFFICES=[{id:'xinyi',name:'信義本部',lat:25.0338,lng:121.5645},{id:'remote',name:'遠端辦公',lat:null,lng:null}];
+const OFFICES=[
+  {id:'xinyi',name:'高尚空間設計',lat:25.0360282,lng:121.5604536},
+  {id:'remote',name:'遠端辦公',lat:null,lng:null}
+];
 function getGPS(){
   setGps('loading','取得位置中…','');
   if(!navigator.geolocation){setGps('fail','不支援GPS','');return;}
