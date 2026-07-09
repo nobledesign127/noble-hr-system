@@ -573,6 +573,114 @@ const CASES = [
 ];
 
 /* ════════════════════════════════════════
+   API 設定
+════════════════════════════════════════ */
+const API_BASE = 'https://noble-hr-api.onrender.com';
+
+// 通用 API 呼叫
+async function api(method, path, body) {
+  try {
+    const res = await fetch(API_BASE + path, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return await res.json();
+  } catch(e) {
+    console.error('API 錯誤', e);
+    return null;
+  }
+}
+
+// 從 API 載入員工資料
+async function loadEmployees() {
+  const data = await api('GET', '/api/employees');
+  if (data && Array.isArray(data)) {
+    S.employees = data.map(e => ({
+      id: e.id,
+      name: e.name,
+      role: e.role,
+      hireDate: e.hire_date,
+      avatar: e.avatar || e.name.charAt(0),
+      status: e.status,
+      baseSalary: e.base_salary || 0,
+      lineId: e.line_id || '',
+      systemRole: e.system_role || 'staff',
+    }));
+    renderEmpList();
+    updateMkEmpSelect();
+  }
+}
+
+// 打卡存到 API
+async function saveCheckin(empId, type, lat, lng, officeId, shiftKey) {
+  return await api('POST', '/api/checkins', {
+    emp_id: empId, type, lat, lng,
+    office_id: officeId, shift_key: shiftKey
+  });
+}
+
+// 請假存到 API
+async function saveLeave(empId, leaveType, startDate, endDate, reason, requireProof) {
+  return await api('POST', '/api/leaves', {
+    emp_id: empId, leave_type: leaveType,
+    start_date: startDate, end_date: endDate,
+    reason, require_proof: requireProof
+  });
+}
+
+// 載入請假紀錄
+async function loadLeaves(empId) {
+  const path = empId ? '/api/leaves/' + empId : '/api/leaves';
+  const data = await api('GET', path);
+  if (data && Array.isArray(data)) {
+    S.leaveRecords = data.map(r => ({
+      id: r.id, type: r.leave_type,
+      name: LEAVE_TYPES.find(l => l.key === r.leave_type)?.name || r.leave_type,
+      emoji: LEAVE_TYPES.find(l => l.key === r.leave_type)?.emoji || '📋',
+      start: r.start_date, end: r.end_date,
+      reason: r.reason, status: r.status,
+      requireProof: r.require_proof,
+      empId: r.emp_id,
+      empName: r.employees?.name || '',
+    }));
+    renderLeaveRecs();
+  }
+}
+
+// 代墊款存到 API
+async function saveExpense(data) {
+  return await api('POST', '/api/expenses', data);
+}
+
+// 載入代墊款
+async function loadExpenses(empId) {
+  const path = empId ? '/api/expenses/' + empId : '/api/expenses';
+  const data = await api('GET', path);
+  if (data && Array.isArray(data)) {
+    S.expenses = data.map(e => ({
+      id: e.id, empId: e.emp_id, empName: e.emp_name,
+      date: e.date, caseId: e.case_id, caseName: e.case_name,
+      cat: e.cat, catName: e.cat_name, desc: e.description,
+      invoice: e.invoice, amount: e.amount,
+      photoUrl: e.photo_url || '', status: e.status,
+      createdAt: e.created_at,
+    }));
+    renderExpensePage();
+  }
+}
+
+// 新增員工到 API
+async function saveEmployee(empData) {
+  return await api('POST', '/api/employees', empData);
+}
+
+// 更新員工
+async function updateEmployee(id, data) {
+  return await api('PATCH', '/api/employees/' + id, data);
+}
+
+/* ════════════════════════════════════════
    State
 ════════════════════════════════════════ */
 const S = {
@@ -584,10 +692,11 @@ const S = {
     staff:     {name:'小涵',     avatar:'涵',empId:'E002',hireDate:'2024-03-01'},
   },
   employees:[
-    {id:'E001',name:'Esther',   role:'設計總監',  hireDate:'2024-01-15',avatar:'E',  status:'active',baseSalary:65000, lineId:'',        systemRole:'老闆'},
-    {id:'E002',name:'小涵',     role:'室內設計師', hireDate:'2024-03-01',avatar:'涵', status:'active',baseSalary:42000, lineId:'',        systemRole:'員工'},
-    {id:'E003',name:'阿哲',     role:'平面設計師', hireDate:'2024-06-15',avatar:'哲', status:'active',baseSalary:38000, lineId:'',        systemRole:'員工'},
-    {id:'E004',name:'行政小美', role:'行政主管',   hireDate:'2024-02-01',avatar:'美', status:'active',baseSalary:40000, lineId:'',        systemRole:'行政主管'},
+    {id:'E001',name:'Esther',   role:'設計總監',  hireDate:'2024-01-15',avatar:'E',  status:'active',baseSalary:65000, lineId:'',                                  systemRole:'老闆'},
+    {id:'E002',name:'小涵',     role:'室內設計師', hireDate:'2024-03-01',avatar:'涵', status:'active',baseSalary:42000, lineId:'',                                  systemRole:'員工'},
+    {id:'E003',name:'阿哲',     role:'平面設計師', hireDate:'2024-06-15',avatar:'哲', status:'active',baseSalary:38000, lineId:'',                                  systemRole:'員工'},
+    {id:'E004',name:'行政小美', role:'行政主管',   hireDate:'2024-02-01',avatar:'美', status:'active',baseSalary:40000, lineId:'',                                  systemRole:'行政主管'},
+    {id:'E005',name:'Joy H',    role:'會計',       hireDate:'2020-01-01',avatar:'J',  status:'active',baseSalary:0,     lineId:'U53cd2442bc28670d752733b4f0beccb6', systemRole:'會計'},
   ],
   schedule:{}, customShiftTimes:{},
   gps:null, clockedIn:false, inTime:null, inDate:null,
@@ -758,6 +867,8 @@ async function doClockAction(){
     else if(c.overMins===0){bn.className='banner buf';bn.textContent=`🟡 遲到 ${c.lateMins} 分，月緩衝扣除，剩 ${remain} 分｜下班 ${c.minOut}`;}
     else{bn.className='banner over';bn.textContent=`🔴 遲到 ${c.lateMins} 分，超出 ${c.overMins} 分｜下班 ${c.minOut}`;}
     addLog('in','上班打卡',near?.o.name||'遠端',ts,c,sh);
+    // 存到後端
+    saveCheckin(S.users[S.role].empId,'in',S.gps?.la,S.gps?.lo,near?.o.id,sh.key);
     // 遲到提示：員工不顯示金額
     const canSeeMoney=ROLES[S.role].canViewSalary;
     const msg=c.status==='ontime'?`✅ 準時上班 ${ts}`:
@@ -768,6 +879,8 @@ async function doClockAction(){
   }else{
     S.clockedIn=false;$('sOut').textContent=ts;$('sOutNote').textContent='完成';
     addLog('out','下班打卡',near?.o.name||'遠端',ts,null,sh);
+    // 存到後端
+    saveCheckin(S.users[S.role].empId,'out',S.gps?.la,S.gps?.lo,near?.o.id,sh.key);
     toast(`下班打卡 ${ts}（${sh.name}）`,'ok');
   }
   renderBuffer();renderSalaryPage();setTimeout(getGPS,400);
@@ -920,8 +1033,17 @@ function submitLeave(){
   if(end<start){toast('結束不可早於開始','err');return;}
   const lt=LEAVE_TYPES.find(x=>x.key===S.leaveType);
   const u=S.users[S.role];
-  S.leaveRecords.unshift({type:lt.key,name:lt.name,emoji:lt.emoji,start,end,reason,status:'pending',requireProof:lt.requireProof,empId:u.empId,id:Date.now()});
-  renderLeaveRecs();renderLeaveGrid();
+  // 存到後端
+  saveLeave(u.empId, S.leaveType, start, end, reason, lt.requireProof).then(saved => {
+    if(saved && saved.id){
+      S.leaveRecords.unshift({
+        id:saved.id, type:lt.key, name:lt.name, emoji:lt.emoji,
+        start, end, reason, status:'pending',
+        requireProof:lt.requireProof, empId:u.empId
+      });
+      renderLeaveRecs(); renderLeaveGrid();
+    }
+  });
   $('lvStart').value=$('lvEnd').value=$('lvReason').value='';
   toast(`📋 ${lt.name}已送出，等待老闆核准`,'ok');
 }
@@ -1078,12 +1200,32 @@ function renderEmpList(){
     </div>`).join('');
 }
 function addEmployee(){
-  const name=$('newEmpName').value.trim(),role=$('newEmpRole').value,hire=$('newEmpHire').value,line=$('newEmpLine').value.trim();
-  if(!name){toast('請填姓名','err');return;}if(!hire){toast('請填到職日','err');return;}
-  S.employees.push({id:'E'+Date.now(),name,role,hireDate:hire,avatar:name.charAt(0),lineId:line,status:'active',baseSalary:null});
-  renderEmpList();updateMkEmpSelect();closeModal('addEmpModal');
-  $('newEmpName').value=$('newEmpLine').value='';
-  toast(`✅ 已新增員工「${name}」`,'ok');
+  const name=$('newEmpName').value.trim(),role=$('newEmpRole').value,
+        hire=$('newEmpHire').value,line=$('newEmpLine').value.trim();
+  if(!name){toast('請填姓名','err');return;}
+  if(!hire){toast('請填到職日','err');return;}
+  const newEmp = {
+    id:'E'+Date.now(), name, role,
+    hire_date: hire, avatar: name.charAt(0),
+    line_id: line || null, system_role: 'staff',
+    base_salary: 0, status: 'active'
+  };
+  saveEmployee(newEmp).then(saved => {
+    if(saved && saved.id){
+      S.employees.push({
+        id:saved.id, name:saved.name, role:saved.role,
+        hireDate:saved.hire_date, avatar:saved.avatar,
+        status:'active', baseSalary:0,
+        lineId:saved.line_id||'', systemRole:'staff'
+      });
+      renderEmpList(); updateMkEmpSelect();
+      closeModal('addEmpModal');
+      $('newEmpName').value=$('newEmpLine').value='';
+      toast(`✅ 已新增員工「${name}」`,'ok');
+    } else {
+      toast('新增失敗，請再試一次','err');
+    }
+  });
 }
 function disableEmp(id){if(!ROLES[S.role].canDisableEmp){toast('只有老闆可停用','err');return;}S.employees=S.employees.map(x=>x.id===id?Object.assign({},x,{status:'inactive'}):x);renderEmpList();toast('已停用帳號','warn');}
 function enableEmp(id){if(!ROLES[S.role].canDisableEmp){toast('只有老闆可啟用','err');return;}S.employees=S.employees.map(x=>x.id===id?Object.assign({},x,{status:'active'}):x);renderEmpList();toast('已重新啟用','ok');}
@@ -1139,8 +1281,14 @@ function openSalaryModal(empId){
 function saveSalary(){
   const base=parseInt($('salModalBase').value);
   if(!base||base<=0){toast('請輸入正確底薪','err');return;}
-  S.employees=S.employees.map(e=>e.id===S.salaryModalEmpId?Object.assign({},e,{baseSalary:base}):e);
-  closeModal('salaryModal');toast('✅ 薪資已更新','ok');renderSalaryPage();
+  updateEmployee(S.salaryModalEmpId, {base_salary: base}).then(saved => {
+    if(saved){
+      S.employees=S.employees.map(e=>e.id===S.salaryModalEmpId?Object.assign({},e,{baseSalary:base}):e);
+      closeModal('salaryModal');
+      toast('✅ 薪資已更新','ok');
+      renderSalaryPage();
+    }
+  });
 }
 
 /* ════════════════════════════════════════
@@ -1244,8 +1392,10 @@ async function initLIFF(){
   $('mkDate').value=$('lvStart').value=$('lvEnd').value=$('expDate').value=t;
   $('bufMonth').textContent=`${new Date().getMonth()+1}月`;
   $('newEmpHire').value=t;
-  // setRole 由 LIFF 決定，Demo 模式才顯示角色切換器
-  initLIFF();
+  // 先從 API 載入員工資料
+  loadEmployees().then(() => {
+    initLIFF();
+  });
   setTimeout(getGPS,600);
 })();
 </script>
