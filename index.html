@@ -251,7 +251,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
       <div class="hdr-logo">高</div>
       <div><div class="hdr-title">高尚空間設計</div><div class="hdr-sub">HR 出勤管理系統</div></div>
     </div>
-    <div class="role-sw">
+    <div class="role-sw" id="roleSw" style="display:none">
       <button class="role-btn owner active" onclick="setRole('owner')">老闆</button>
       <button class="role-btn admin"        onclick="setRole('admin')">行政</button>
       <button class="role-btn accounting"   onclick="setRole('accounting')">會計</button>
@@ -546,11 +546,11 @@ const SHIFTS = {
    假別
 ════════════════════════════════════════ */
 const LEAVE_TYPES = [
-  {key:'annual',   name:'特休',  emoji:'🌿',note:'有薪', requireProof:false,yearLimit:null,monthlyCap:null},
-  {key:'sick',     name:'病假',  emoji:'🏥',note:'半薪', requireProof:true, yearLimit:30,  monthlyCap:null},
-  {key:'menstrual',name:'生理假',emoji:'🌸',note:'半薪', requireProof:false,yearLimit:null,monthlyCap:1},
-  {key:'personal', name:'事假',  emoji:'📝',note:'無薪', requireProof:false,yearLimit:14,  monthlyCap:null},
-  {key:'comp',     name:'補休',  emoji:'🔁',note:'有薪', requireProof:false,yearLimit:null,monthlyCap:null},
+  {key:'annual',   name:'特休',  emoji:'🌿',note:'', requireProof:false,yearLimit:null,monthlyCap:null},
+  {key:'sick',     name:'病假',  emoji:'🏥',note:'需證明', requireProof:true, yearLimit:30,  monthlyCap:null},
+  {key:'menstrual',name:'生理假',emoji:'🌸',note:'', requireProof:false,yearLimit:null,monthlyCap:1},
+  {key:'personal', name:'事假',  emoji:'📝',note:'', requireProof:false,yearLimit:14,  monthlyCap:null},
+  {key:'comp',     name:'補休',  emoji:'🔁',note:'', requireProof:false,yearLimit:null,monthlyCap:null},
   // {key:'funeral',name:'喪假',emoji:'🕯️',note:'全薪',requireProof:true,yearLimit:8,monthlyCap:null},
   // {key:'marriage',name:'婚假',emoji:'💍',note:'全薪',requireProof:true,yearLimit:8,monthlyCap:null},
 ];
@@ -1175,47 +1175,64 @@ function today(){return new Date().toISOString().split('T')[0]}
 ════════════════════════════════════════ */
 async function initLIFF(){
   try{
-    // 載入 LIFF SDK
     if(typeof liff === 'undefined'){
-      console.log('Demo 模式，LIFF 未載入');
+      // Demo 模式：顯示角色切換器讓測試用
+      console.log('Demo 模式');
+      document.getElementById('roleSw').style.display='flex';
       return;
     }
+    // 正式模式：隱藏角色切換器，由 LINE ID 決定角色
+    document.getElementById('roleSw').style.display='none';
     await liff.init({liffId:'2010371976-U8wLomXx'});
-    if(!liff.isLoggedIn()){
-      liff.login();
-      return;
-    }
+    if(!liff.isLoggedIn()){ liff.login(); return; }
+
     const p = await liff.getProfile();
     const lineUserId = p.userId;
-    const displayName = p.displayName;
 
-    // 用 LINE User ID 查詢員工角色
     const matched = S.employees.find(e => e.lineId === lineUserId);
     if(matched){
-      // 找到對應員工，自動設定角色
-      const roleMap = {
-        '老闆':'owner', '行政主管':'admin',
-        '會計':'accounting'
-      };
+      const roleMap = {'老闆':'owner','行政主管':'admin','會計':'accounting'};
       const autoRole = roleMap[matched.systemRole] || 'staff';
-      S.users[autoRole] = {
-        name: matched.name,
-        avatar: matched.avatar,
-        empId: matched.id,
-        hireDate: matched.hireDate
-      };
+      S.users[autoRole] = {name:matched.name,avatar:matched.avatar,empId:matched.id,hireDate:matched.hireDate};
       setRole(autoRole);
-      // 登入後隱藏角色切換器（正式上線用）
-      // document.querySelector('.role-sw').style.display='none';
     } else {
-      // 找不到員工資料，顯示提示
-      $('uName').textContent = displayName;
-      $('uAv').textContent = displayName.charAt(0);
-      toast('你的 LINE 帳號尚未綁定，請聯繫行政主管', 'warn');
+      // 未綁定：強制 staff 最低權限，隱藏所有導覽，只顯示未綁定畫面
+      setRole('staff');
+      $('uName').textContent = p.displayName;
+      $('uAv').textContent   = p.displayName.charAt(0);
+      $('uBadge').textContent = '未綁定';
+      $('uBadge').style.background = 'var(--orange)';
+      $('uBadge').style.color = 'white';
+      // 隱藏所有導覽按鈕
+      ['nav-schedule','nav-leave','nav-expense','nav-employees','nav-salary'].forEach(id=>{ 
+        var el=$(id); if(el) el.style.display='none';
+      });
+      // 顯示未綁定畫面
+      var hero=document.querySelector('.clock-hero');
+      if(hero){
+        hero.innerHTML=`
+          <div style="text-align:center;padding:24px 10px">
+            <div style="font-size:48px;margin-bottom:12px">🔗</div>
+            <div style="font-size:16px;font-weight:900;color:var(--ink);margin-bottom:8px">帳號尚未綁定</div>
+            <div style="font-size:13px;color:#888;margin-bottom:20px;line-height:1.6">請截圖以下資訊<br>傳給行政主管或老闆綁定</div>
+            <div style="background:var(--mist);border-radius:12px;padding:14px;margin-bottom:10px;text-align:left">
+              <div style="font-size:11px;color:#aaa;margin-bottom:4px">你的名稱</div>
+              <div style="font-size:15px;font-weight:700">${p.displayName}</div>
+            </div>
+            <div style="background:var(--dark);border-radius:12px;padding:14px;margin-bottom:14px;text-align:left">
+              <div style="font-size:11px;color:#aaa;margin-bottom:6px">LINE User ID（傳給主管）</div>
+              <div style="font-size:12px;font-weight:900;color:var(--gold);word-break:break-all">${lineUserId}</div>
+            </div>
+            <div style="background:var(--orange-lt);border-radius:10px;padding:12px;font-size:12px;color:var(--orange)">
+              📋 截圖此頁面傳給行政主管，完成綁定後即可打卡
+            </div>
+          </div>`;
+      }
     }
-    console.log('LINE 登入成功：', lineUserId);
+    console.log('LINE 登入：', lineUserId);
   } catch(e){
-    console.log('Demo 模式', e.message);
+    console.log('LIFF 錯誤，切換 Demo 模式', e.message);
+    document.getElementById('roleSw').style.display='flex';
   }
 }
 
@@ -1227,7 +1244,7 @@ async function initLIFF(){
   $('mkDate').value=$('lvStart').value=$('lvEnd').value=$('expDate').value=t;
   $('bufMonth').textContent=`${new Date().getMonth()+1}月`;
   $('newEmpHire').value=t;
-  setRole('owner');
+  // setRole 由 LIFF 決定，Demo 模式才顯示角色切換器
   initLIFF();
   setTimeout(getGPS,600);
 })();
