@@ -1520,8 +1520,13 @@ function switchPage(n){
   $('page-'+n).classList.add('active');$('nav-'+n).classList.add('active');
   if(n==='schedule')renderScheduleWeek();
   if(n==='leave'){
-    renderLeaveGrid();renderLeaveRecs();
+    renderLeaveGrid();
     const u=S.users[S.role];
+    const role=ROLES[S.role];
+    // 從資料庫載入請假紀錄
+    loadLeaves(role.canViewAll ? null : u.empId).then(()=>{
+      renderLeaveRecs();
+    });
     const dbg=$('leaveDebug');
     if(dbg) dbg.textContent=`身份：${u.name}｜ID：${u.empId||'❌ 空'}｜角色：${S.role}`;
   }
