@@ -664,24 +664,24 @@ async function api(method, path, body) {
 // 從 API 載入員工資料
 async function loadEmployees() {
   try {
-    const data = await api('GET', '/api/employees');
-    if (data && Array.isArray(data) && data.length > 0) {
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
+    const { data, error } = await sb.from('employees').select('*').order('id');
+    if(error) throw error;
+    if (data && data.length > 0) {
       S.employees = data.map(e => ({
-        id: e.id,
-        name: e.name,
-        role: e.role,
+        id: e.id, name: e.name, role: e.role,
         hireDate: e.hire_date,
         avatar: e.avatar || e.name.charAt(0),
         status: e.status,
         baseSalary: e.base_salary || 0,
         lineId: e.line_id || '',
         systemRole: e.system_role || 'staff',
+        employeeType: e.employee_type || 'full_time',
       }));
       console.log('員工資料載入成功：', S.employees.length, '人');
       renderEmpList();
       updateMkEmpSelect();
-    } else {
-      console.log('員工資料載入失敗，使用預設資料');
     }
   } catch(e) {
     console.error('loadEmployees 錯誤：', e);
@@ -698,29 +698,44 @@ async function saveCheckin(empId, type, lat, lng, officeId, shiftKey) {
 
 // 請假存到 API
 async function saveLeave(empId, leaveType, startDate, endDate, reason, requireProof) {
-  return await api('POST', '/api/leaves', {
-    emp_id: empId, leave_type: leaveType,
-    start_date: startDate, end_date: endDate,
-    reason, require_proof: requireProof
-  });
+  try{
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
+    const { data, error } = await sb.from('leave_requests').insert([{
+      emp_id: empId, leave_type: leaveType,
+      start_date: startDate, end_date: endDate,
+      reason, require_proof: requireProof || false
+    }]).select().single();
+    if(error) throw error;
+    return data;
+  }catch(e){
+    console.error('saveLeave 錯誤：', e);
+    return null;
+  }
 }
 
-// 載入請假紀錄
 async function loadLeaves(empId) {
-  const path = empId ? '/api/leaves/' + empId : '/api/leaves';
-  const data = await api('GET', path);
-  if (data && Array.isArray(data)) {
-    S.leaveRecords = data.map(r => ({
-      id: r.id, type: r.leave_type,
-      name: LEAVE_TYPES.find(l => l.key === r.leave_type)?.name || r.leave_type,
-      emoji: LEAVE_TYPES.find(l => l.key === r.leave_type)?.emoji || '📋',
-      start: r.start_date, end: r.end_date,
-      reason: r.reason, status: r.status,
-      requireProof: r.require_proof,
-      empId: r.emp_id,
-      empName: r.employees?.name || '',
-    }));
-    renderLeaveRecs();
+  try {
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
+    let query = sb.from('leave_requests').select('*, employees(name, role)').order('created_at', {ascending: false});
+    if(empId) query = query.eq('emp_id', empId);
+    const { data, error } = await query;
+    if(error) throw error;
+    if(data && data.length > 0){
+      S.leaveRecords = data.map(r => ({
+        id: r.id, type: r.leave_type,
+        name: LEAVE_TYPES.find(l => l.key === r.leave_type)?.name || r.leave_type,
+        emoji: LEAVE_TYPES.find(l => l.key === r.leave_type)?.emoji || '📋',
+        start: r.start_date, end: r.end_date,
+        reason: r.reason, status: r.status,
+        requireProof: r.require_proof,
+        empId: r.emp_id,
+        empName: r.employees?.name || '',
+      }));
+    }
+  } catch(e) {
+    console.error('loadLeaves 錯誤：', e);
   }
 }
 
@@ -1177,8 +1192,26 @@ function renderLeaveRecs(){
     </div>`;
   }).join('');
 }
-function approveLeave(id){if(!ROLES[S.role].canApproveLeave){toast('只有老闆可核准','err');return;}S.leaveRecords=S.leaveRecords.map(r=>r.id===id?Object.assign({},r,{status:'approved'}):r);renderLeaveRecs();toast('✅ 假單已核准','ok');}
-function rejectLeave(id){if(!ROLES[S.role].canApproveLeave){toast('只有老闆可拒絕','err');return;}S.leaveRecords=S.leaveRecords.map(r=>r.id===id?Object.assign({},r,{status:'rejected'}):r);renderLeaveRecs();toast('已拒絕','warn');}
+async function approveLeave(id){
+  if(!ROLES[S.role].canApproveLeave){toast('只有老闆可核准','err');return;}
+  try{
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
+    await sb.from('leave_requests').update({status:'approved'}).eq('id', id);
+  }catch(e){console.error(e);}
+  S.leaveRecords=S.leaveRecords.map(r=>r.id===id?Object.assign({},r,{status:'approved'}):r);
+  renderLeaveRecs();toast('✅ 假單已核准','ok');
+}
+async function rejectLeave(id){
+  if(!ROLES[S.role].canApproveLeave){toast('只有老闆可拒絕','err');return;}
+  try{
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
+    await sb.from('leave_requests').update({status:'rejected'}).eq('id', id);
+  }catch(e){console.error(e);}
+  S.leaveRecords=S.leaveRecords.map(r=>r.id===id?Object.assign({},r,{status:'rejected'}):r);
+  renderLeaveRecs();toast('已拒絕','warn');
+}
 function deleteLeave(id){if(!ROLES[S.role].canDeleteLeave){toast('無權限','err');return;}S.leaveRecords=S.leaveRecords.filter(r=>r.id!==id);renderLeaveRecs();toast('🗑️ 假單已取消','warn');}
 
 /* ════════════════════════════════════════
