@@ -1509,7 +1509,7 @@ function switchPage(n){
     renderLeaveGrid();renderLeaveRecs();
     const u=S.users[S.role];
     const dbg=$('leaveDebug');
-    if(dbg) dbg.textContent=`身份：${u.name}（${u.empId||'❌ 未識別'}）`;
+    if(dbg) dbg.textContent=`身份：${u.name}｜ID：${u.empId||'❌ 空'}｜角色：${S.role}`;
   }
   if(n==='expense')renderExpensePage();
   if(n==='overtime'){$('otDate').value=today();renderOvertimePage();}
