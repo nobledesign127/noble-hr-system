@@ -690,10 +690,19 @@ async function loadEmployees() {
 
 // 打卡存到 API
 async function saveCheckin(empId, type, lat, lng, officeId, shiftKey) {
-  return await api('POST', '/api/checkins', {
-    emp_id: empId, type, lat, lng,
-    office_id: officeId, shift_key: shiftKey
-  });
+  try{
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
+    const { data, error } = await sb.from('checkins').insert([{
+      emp_id: empId, type, lat, lng,
+      office_id: officeId, shift_key: shiftKey
+    }]).select().single();
+    if(error) throw error;
+    return data;
+  }catch(e){
+    console.error('saveCheckin 錯誤：', e);
+    return null;
+  }
 }
 
 // 請假存到 API
@@ -739,36 +748,67 @@ async function loadLeaves(empId) {
   }
 }
 
-// 代墊款存到 API
-async function saveExpense(data) {
-  return await api('POST', '/api/expenses', data);
-}
-
-// 載入代墊款
-async function loadExpenses(empId) {
-  const path = empId ? '/api/expenses/' + empId : '/api/expenses';
-  const data = await api('GET', path);
-  if (data && Array.isArray(data)) {
-    S.expenses = data.map(e => ({
-      id: e.id, empId: e.emp_id, empName: e.emp_name,
-      date: e.date, caseId: e.case_id, caseName: e.case_name,
-      cat: e.cat, catName: e.cat_name, desc: e.description,
-      invoice: e.invoice, amount: e.amount,
-      photoUrl: e.photo_url || '', status: e.status,
-      createdAt: e.created_at,
-    }));
-    renderExpensePage();
+async function saveExpense(expData) {
+  try{
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
+    const { data, error } = await sb.from('expenses').insert([expData]).select().single();
+    if(error) throw error;
+    return data;
+  }catch(e){
+    console.error('saveExpense 錯誤：', e);
+    return null;
   }
 }
 
-// 新增員工到 API
-async function saveEmployee(empData) {
-  return await api('POST', '/api/employees', empData);
+async function loadExpenses(empId) {
+  try{
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
+    let query = sb.from('expenses').select('*').order('created_at', {ascending: false});
+    if(empId) query = query.eq('emp_id', empId);
+    const { data, error } = await query;
+    if(error) throw error;
+    if(data && data.length > 0){
+      S.expenses = data.map(e => ({
+        id: e.id, empId: e.emp_id, empName: e.emp_name,
+        date: e.date, caseId: e.case_id, caseName: e.case_name,
+        cat: e.cat, catName: e.cat_name, desc: e.description,
+        invoice: e.invoice, amount: e.amount,
+        photoUrl: e.photo_url || '', status: e.status,
+        createdAt: e.created_at,
+      }));
+      renderExpensePage();
+    }
+  }catch(e){
+    console.error('loadExpenses 錯誤：', e);
+  }
 }
 
-// 更新員工
-async function updateEmployee(id, data) {
-  return await api('PATCH', '/api/employees/' + id, data);
+async function saveEmployee(empData) {
+  try{
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
+    const { data, error } = await sb.from('employees').insert([empData]).select().single();
+    if(error) throw error;
+    return data;
+  }catch(e){
+    console.error('saveEmployee 錯誤：', e);
+    return null;
+  }
+}
+
+async function updateEmployee(id, updateData) {
+  try{
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
+    const { data, error } = await sb.from('employees').update(updateData).eq('id', id).select().single();
+    if(error) throw error;
+    return data;
+  }catch(e){
+    console.error('updateEmployee 錯誤：', e);
+    return null;
+  }
 }
 
 /* ════════════════════════════════════════
