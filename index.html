@@ -641,17 +641,8 @@ const API_BASE = 'https://noble-hr-api.onrender.com';
 
 async function sendLineMsg(msg){
   try{
-    await fetch('https://api.line.me/v2/bot/message/push',{
-      method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'Authorization':'Bearer gWSjEhRL7CZdieWS1t6L69sj+BLxG98tNy7R30pQBI3cZCGlo6h8A6qxTSjvKV+RnIkJiEsLc0JdARUbFGqDjJ1LPAKswJgP2ZdT0OT+t934fi03BmsI2WLmknYYQafe0gGLCpi9NYH1LGhwZ2wkNAdB04t89/1O/w1cDnyilFU='
-      },
-      body:JSON.stringify({
-        to:'U5b0281c36ad0b3eca858b136aca3d195',
-        messages:[{type:'text',text:msg}]
-      })
-    });
+    // 透過後端發送，Token 不暴露在前端
+    await api('POST', '/api/notify', { message: msg });
   }catch(e){console.log('LINE 通知',e);}
 }
 
