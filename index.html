@@ -727,21 +727,26 @@ async function loadLeaves(empId) {
   try {
     const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
     const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
-    let query = sb.from('leave_requests').select('*, employees(name, role)').order('created_at', {ascending: false});
+    let query = sb.from('leave_requests').select('*').order('created_at', {ascending: false});
     if(empId) query = query.eq('emp_id', empId);
     const { data, error } = await query;
+    console.log('loadLeaves 結果：', data?.length, error);
     if(error) throw error;
-    if(data && data.length > 0){
-      S.leaveRecords = data.map(r => ({
-        id: r.id, type: r.leave_type,
-        name: LEAVE_TYPES.find(l => l.key === r.leave_type)?.name || r.leave_type,
-        emoji: LEAVE_TYPES.find(l => l.key === r.leave_type)?.emoji || '📋',
-        start: r.start_date, end: r.end_date,
-        reason: r.reason, status: r.status,
-        requireProof: r.require_proof,
-        empId: r.emp_id,
-        empName: r.employees?.name || '',
-      }));
+    if(data){
+      S.leaveRecords = data.map(r => {
+        const emp = S.employees.find(e => e.id === r.emp_id);
+        return {
+          id: r.id, type: r.leave_type,
+          name: LEAVE_TYPES.find(l => l.key === r.leave_type)?.name || r.leave_type,
+          emoji: LEAVE_TYPES.find(l => l.key === r.leave_type)?.emoji || '📋',
+          start: r.start_date, end: r.end_date,
+          reason: r.reason, status: r.status,
+          requireProof: r.require_proof,
+          empId: r.emp_id,
+          empName: emp?.name || r.emp_id,
+        };
+      });
+      renderLeaveRecs();
     }
   } catch(e) {
     console.error('loadLeaves 錯誤：', e);
