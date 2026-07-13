@@ -225,16 +225,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 .lightbox img{max-width:90%;max-height:80vh;border-radius:12px}
 .lb-close{position:absolute;top:20px;right:20px;background:#ffffff22;border:none;color:var(--white);font-size:18px;width:34px;height:34px;border-radius:50%;cursor:pointer}
 
-/* ── LOADING ────────────────────────── */
-#loadingOverlay{position:fixed;inset:0;background:#12121E;z-index:998;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;transition:opacity .5s}
-#loadingOverlay.hide{opacity:0;pointer-events:none}
-.ld-logo{width:90px;height:90px;background:var(--gold);border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:40px;font-weight:900;color:var(--dark);animation:ldpulse 1.5s infinite}
-.ld-name{color:var(--white);font-size:18px;font-weight:700;letter-spacing:3px}
-.ld-sub{color:#555;font-size:12px;letter-spacing:2px}
-.ld-dots{display:flex;gap:8px;margin-top:8px}
-.ld-dot{width:8px;height:8px;border-radius:50%;background:var(--gold);animation:blink 1.2s infinite}
-.ld-dot:nth-child(2){animation-delay:.2s}.ld-dot:nth-child(3){animation-delay:.4s}
-@keyframes ldpulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+
 /* ── TOAST ──────────────────────────── */
 #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--ink);color:var(--white);padding:8px 16px;border-radius:26px;font-size:12px;font-weight:600;white-space:nowrap;z-index:999;transition:transform .3s cubic-bezier(.34,1.56,.64,1);pointer-events:none}
 #toast.show{transform:translateX(-50%) translateY(0)}
@@ -267,11 +258,6 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
       <button class="role-btn accounting"   onclick="setRole('accounting')">會計</button>
       <button class="role-btn staff"        onclick="setRole('staff')">員工</button>
   </div>
-      <button class="role-btn owner active" onclick="setRole('owner')">老闆</button>
-      <button class="role-btn admin"        onclick="setRole('admin')">行政</button>
-      <button class="role-btn accounting"   onclick="setRole('accounting')">會計</button>
-      <button class="role-btn staff"        onclick="setRole('staff')">員工</button>
-    </div>
   </div>
   <div class="user-pill">
     <div class="u-av" id="uAv" style="background:var(--gold);color:var(--dark)">E</div>
@@ -585,16 +571,6 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
   <img id="lbImg"/><button class="lb-close">✕</button>
 </div>
 
-<div id="loadingOverlay">
-  <div class="ld-logo">高</div>
-  <div class="ld-name">Noble Design Daka</div>
-  <div class="ld-sub">識別身份中…</div>
-  <div class="ld-dots">
-    <div class="ld-dot"></div>
-    <div class="ld-dot"></div>
-    <div class="ld-dot"></div>
-  </div>
-</div>
 <div id="toast"></div>
 
 <script>
@@ -1549,10 +1525,6 @@ function today(){return new Date().toISOString().split('T')[0]}
 /* ════════════════════════════════════════
    LINE LIFF
 ════════════════════════════════════════ */
-function hideLoading(){
-  var el=document.getElementById('loadingOverlay');
-  if(el){el.classList.add('hide');setTimeout(function(){el.remove();},500);}
-}
 
 async function initLIFF(){
   try{
@@ -1561,7 +1533,6 @@ async function initLIFF(){
       console.log('Demo 模式');
       document.getElementById('roleSw').style.display='flex';
       setRole('owner');
-      hideLoading();
       return;
     }
     // 正式模式：隱藏角色切換器，由 LINE ID 決定角色
@@ -1578,7 +1549,6 @@ async function initLIFF(){
       const autoRole = roleMap[matched.systemRole] || 'staff';
       S.users[autoRole] = {name:matched.name,avatar:matched.avatar,empId:matched.id,hireDate:matched.hireDate};
       setRole(autoRole);
-      hideLoading();
     } else {
       // 未綁定：強制 staff 最低權限，隱藏所有導覽，只顯示未綁定畫面
       setRole('staff');
@@ -1613,12 +1583,10 @@ async function initLIFF(){
           </div>`;
       }
     }
-    hideLoading();
     console.log('LINE 登入：', lineUserId);
   } catch(e){
     console.log('LIFF 錯誤，切換 Demo 模式', e.message);
     document.getElementById('roleSw').style.display='flex';
-    hideLoading();
   }
 }
 
