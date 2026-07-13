@@ -695,11 +695,11 @@ async function loadEmployees() {
         systemRole: e.system_role || 'staff',
       }));
       console.log('員工資料載入成功：', S.employees.length, '人');
+      renderEmpList();
+      updateMkEmpSelect();
     } else {
       console.log('員工資料載入失敗，使用預設資料');
     }
-    renderEmpList();
-    updateMkEmpSelect();
   } catch(e) {
     console.error('loadEmployees 錯誤：', e);
   }
@@ -1630,28 +1630,14 @@ async function initLIFF(){
   $('mkDate').value=$('lvStart').value=$('lvEnd').value=$('expDate').value=t;
   $('bufMonth').textContent=`${new Date().getMonth()+1}月`;
   $('newEmpHire').value=t;
-
-  // 先喚醒 API，最多等 60 秒，然後載入員工資料
-  async function wakeAndLoad(){
-    let tries = 0;
-    while(tries < 6){
-      try{
-        const res = await fetch(API_BASE + '/health', {signal: AbortSignal.timeout(10000)});
-        if(res.ok){
-          console.log('API 已喚醒');
-          await loadEmployees();
-          break;
-        }
-      } catch(e){
-        tries++;
-        console.log('API 喚醒中...', tries);
-        await new Promise(r => setTimeout(r, 5000));
-      }
-    }
-    initLIFF();
-  }
-  wakeAndLoad();
   setTimeout(getGPS,600);
+
+  // 載入員工資料後再初始化 LIFF
+  loadEmployees().then(()=>{
+    initLIFF();
+  }).catch(()=>{
+    initLIFF();
+  });
 })();
 </script>
 </body>
