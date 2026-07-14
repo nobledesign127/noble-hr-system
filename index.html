@@ -634,8 +634,58 @@ const CASES = [
   {id:'custom',   name:'✏️ 其他',     color:'#888'},
 ];
 
+
 /* ════════════════════════════════════════
-   API 設定
+   Supabase REST API 直接呼叫
+════════════════════════════════════════ */
+const SB_URL = 'https://mfibmcabhhtcxxursfyl.supabase.co';
+const SB_KEY = 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs';
+
+async function sbGet(table, params) {
+  const url = new URL(`${SB_URL}/rest/v1/${table}`);
+  if(params) Object.entries(params).forEach(([k,v]) => url.searchParams.set(k,v));
+  const res = await fetch(url, {
+    headers: {
+      'apikey': SB_KEY,
+      'Authorization': `Bearer ${SB_KEY}`,
+      'Content-Type': 'application/json'
+    }
+  });
+  return await res.json();
+}
+
+async function sbPost(table, data) {
+  const res = await fetch(`${SB_URL}/rest/v1/${table}`, {
+    method: 'POST',
+    headers: {
+      'apikey': SB_KEY,
+      'Authorization': `Bearer ${SB_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    },
+    body: JSON.stringify(data)
+  });
+  const result = await res.json();
+  return Array.isArray(result) ? result[0] : result;
+}
+
+async function sbPatch(table, id, data) {
+  const res = await fetch(`${SB_URL}/rest/v1/${table}?id=eq.${id}`, {
+    method: 'PATCH',
+    headers: {
+      'apikey': SB_KEY,
+      'Authorization': `Bearer ${SB_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    },
+    body: JSON.stringify(data)
+  });
+  const result = await res.json();
+  return Array.isArray(result) ? result[0] : result;
+}
+
+/* ════════════════════════════════════════
+   API 設定（Render 後端，僅用於 LINE 通知）
 ════════════════════════════════════════ */
 const API_BASE = 'https://noble-hr-api.onrender.com';
 
@@ -664,11 +714,8 @@ async function api(method, path, body) {
 // 從 API 載入員工資料
 async function loadEmployees() {
   try {
-    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
-    const { data, error } = await sb.from('employees').select('*').order('id');
-    if(error) throw error;
-    if (data && data.length > 0) {
+    const data = await sbGet('employees', {'order': 'id'});
+    if (data && Array.isArray(data) && data.length > 0) {
       S.employees = data.map(e => ({
         id: e.id, name: e.name, role: e.role,
         hireDate: e.hire_date,
@@ -691,14 +738,10 @@ async function loadEmployees() {
 // 打卡存到 API
 async function saveCheckin(empId, type, lat, lng, officeId, shiftKey) {
   try{
-    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
-    const { data, error } = await sb.from('checkins').insert([{
+    return await sbPost('checkins', {
       emp_id: empId, type, lat, lng,
       office_id: officeId, shift_key: shiftKey
-    }]).select().single();
-    if(error) throw error;
-    return data;
+    });
   }catch(e){
     console.error('saveCheckin 錯誤：', e);
     return null;
@@ -708,14 +751,11 @@ async function saveCheckin(empId, type, lat, lng, officeId, shiftKey) {
 // 請假存到 API
 async function saveLeave(empId, leaveType, startDate, endDate, reason, requireProof) {
   try{
-    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
-    const { data, error } = await sb.from('leave_requests').insert([{
+    const data = await sbPost('leave_requests', {
       emp_id: empId, leave_type: leaveType,
       start_date: startDate, end_date: endDate,
-      reason, require_proof: requireProof || false
-    }]).select().single();
-    if(error) throw error;
+      reason: reason || null, require_proof: requireProof || false
+    });
     return data;
   }catch(e){
     console.error('saveLeave 錯誤：', e);
@@ -725,14 +765,11 @@ async function saveLeave(empId, leaveType, startDate, endDate, reason, requirePr
 
 async function loadLeaves(empId) {
   try {
-    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
-    let query = sb.from('leave_requests').select('*').order('created_at', {ascending: false});
-    if(empId) query = query.eq('emp_id', empId);
-    const { data, error } = await query;
-    console.log('loadLeaves 結果：', data?.length, error);
-    if(error) throw error;
-    if(data){
+    const params = {'order': 'created_at.desc'};
+    if(empId) params['emp_id'] = 'eq.' + empId;
+    const data = await sbGet('leave_requests', params);
+    console.log('loadLeaves 結果：', data?.length, data);
+    if(data && Array.isArray(data)){
       S.leaveRecords = data.map(r => {
         const emp = S.employees.find(e => e.id === r.emp_id);
         return {
@@ -755,11 +792,7 @@ async function loadLeaves(empId) {
 
 async function saveExpense(expData) {
   try{
-    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
-    const { data, error } = await sb.from('expenses').insert([expData]).select().single();
-    if(error) throw error;
-    return data;
+    return await sbPost('expenses', expData);
   }catch(e){
     console.error('saveExpense 錯誤：', e);
     return null;
@@ -768,13 +801,10 @@ async function saveExpense(expData) {
 
 async function loadExpenses(empId) {
   try{
-    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
-    let query = sb.from('expenses').select('*').order('created_at', {ascending: false});
-    if(empId) query = query.eq('emp_id', empId);
-    const { data, error } = await query;
-    if(error) throw error;
-    if(data && data.length > 0){
+    const params = {'order': 'created_at.desc'};
+    if(empId) params['emp_id'] = 'eq.' + empId;
+    const data = await sbGet('expenses', params);
+    if(data && Array.isArray(data) && data.length > 0){
       S.expenses = data.map(e => ({
         id: e.id, empId: e.emp_id, empName: e.emp_name,
         date: e.date, caseId: e.case_id, caseName: e.case_name,
@@ -791,29 +821,13 @@ async function loadExpenses(empId) {
 }
 
 async function saveEmployee(empData) {
-  try{
-    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
-    const { data, error } = await sb.from('employees').insert([empData]).select().single();
-    if(error) throw error;
-    return data;
-  }catch(e){
-    console.error('saveEmployee 錯誤：', e);
-    return null;
-  }
+  try{ return await sbPost('employees', empData); }
+  catch(e){ console.error('saveEmployee 錯誤：', e); return null; }
 }
 
 async function updateEmployee(id, updateData) {
-  try{
-    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
-    const { data, error } = await sb.from('employees').update(updateData).eq('id', id).select().single();
-    if(error) throw error;
-    return data;
-  }catch(e){
-    console.error('updateEmployee 錯誤：', e);
-    return null;
-  }
+  try{ return await sbPatch('employees', id, updateData); }
+  catch(e){ console.error('updateEmployee 錯誤：', e); return null; }
 }
 
 /* ════════════════════════════════════════
@@ -1239,21 +1253,13 @@ function renderLeaveRecs(){
 }
 async function approveLeave(id){
   if(!ROLES[S.role].canApproveLeave){toast('只有老闆可核准','err');return;}
-  try{
-    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
-    await sb.from('leave_requests').update({status:'approved'}).eq('id', id);
-  }catch(e){console.error(e);}
+  try{ await sbPatch('leave_requests', id, {status:'approved'}); }catch(e){console.error(e);}
   S.leaveRecords=S.leaveRecords.map(r=>r.id===id?Object.assign({},r,{status:'approved'}):r);
   renderLeaveRecs();toast('✅ 假單已核准','ok');
 }
 async function rejectLeave(id){
   if(!ROLES[S.role].canApproveLeave){toast('只有老闆可拒絕','err');return;}
-  try{
-    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-    const sb = createClient('https://mfibmcabhhtcxxursfyl.supabase.co', 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs');
-    await sb.from('leave_requests').update({status:'rejected'}).eq('id', id);
-  }catch(e){console.error(e);}
+  try{ await sbPatch('leave_requests', id, {status:'rejected'}); }catch(e){console.error(e);}
   S.leaveRecords=S.leaveRecords.map(r=>r.id===id?Object.assign({},r,{status:'rejected'}):r);
   renderLeaveRecs();toast('已拒絕','warn');
 }
