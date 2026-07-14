@@ -1238,7 +1238,7 @@ setInterval(()=>{
   }
 }, 30000);
 
-function reloadLeaves(){
+async function reloadLeaves(){
   const role=ROLES[S.role];
   const u=S.users[S.role];
   toast('載入中…','ok');
