@@ -1277,7 +1277,7 @@ async function rejectLeave(id){
   S.leaveRecords=S.leaveRecords.map(r=>r.id===id?Object.assign({},r,{status:'rejected'}):r);
   renderLeaveRecs();toast('已拒絕','warn');
 }
-function deleteLeave(id){if(!ROLES[S.role].canDeleteLeave){toast('無權限','err');return;}S.leaveRecords=S.leaveRecords.filter(r=>r.id!==id);renderLeaveRecs();toast('🗑️ 假單已取消','warn');}
+async function deleteLeave(id){if(!ROLES[S.role].canDeleteLeave){toast('無權限','err');return;}try{await fetch(SB_URL+'/rest/v1/leave_requests?id=eq.'+id,{method:'DELETE',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}});}catch(e){console.error(e);}S.leaveRecords=S.leaveRecords.filter(r=>r.id!==id);renderLeaveRecs();toast('🗑️ 假單已取消','warn');}
 
 /* ════════════════════════════════════════
    代墊款
