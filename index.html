@@ -1698,8 +1698,13 @@ async function initLIFF(){
     }
     console.log('LINE 登入：', lineUserId);
   } catch(e){
-    console.log('LIFF 錯誤，切換 Demo 模式', e.message);
-    document.getElementById('roleSw').style.display='flex';
+    console.log('LIFF 錯誤', e.message);
+    // 即使出錯，在 LIFF 環境下也不顯示角色切換器
+    if(typeof liff !== 'undefined'){
+      document.getElementById('roleSw').style.display='none';
+    } else {
+      document.getElementById('roleSw').style.display='flex';
+    }
   }
 }
 
