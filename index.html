@@ -547,7 +547,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
       <option>室內設計師</option><option>室內設計助理</option>
       <option>平面設計師</option><option>平面設計助理</option>
       <option>視覺設計師</option><option>視覺設計助理</option>
-      <option>行政</option>
+      <option>行政</option><option>行政主管</option>
       <option>會計</option><option>實習生</option>
       <option>工讀生</option><option>其他</option>
     </select>
@@ -594,7 +594,7 @@ const ROLES = {
   accounting: { label:'會計',    color:'#34D399', tc:'var(--dark)',
     canApproveLeave:false, canDeleteLeave:false, canMakeup:false, canEditSchedule:false,
     canAddEmp:true, canDisableEmp:false, canViewAll:true,
-    canViewSalary:true, canEditSalary:true, canViewExp:true, canApproveExp:false, canMarkPaid:true },
+    canViewSalary:true, canEditSalary:true, canViewExp:true, canApproveExp:true, canMarkPaid:true },
   staff:      { label:'員工',    color:'#A78BFA', tc:'var(--dark)',
     canApproveLeave:false, canDeleteLeave:false, canMakeup:false, canEditSchedule:false,
     canAddEmp:false, canDisableEmp:false, canViewAll:false,
@@ -1229,7 +1229,7 @@ function submitLeave(){
   $('lvStart').value=$('lvEnd').value=$('lvReason').value='';
   toast(`📋 ${lt.name}已送出，等待主管核准`,'ok');
 }
- // 自動每 30 秒刷新請假紀錄
+async // 自動每 30 秒刷新請假紀錄
 setInterval(()=>{
   if($('page-leave') && $('page-leave').classList.contains('active')){
     const u=S.users[S.role];
@@ -1371,19 +1371,20 @@ function renderExpensePage(){
   const mine=S.expenses.filter(e=>e.empId===u.empId);
   const approvedTotal=mine.filter(e=>['approved','paid'].includes(e.status)).reduce((s,e)=>s+e.amount,0);
   $('myExpTotal').textContent=approvedTotal>0?`已核准 NT$${approvedTotal.toLocaleString()}`:'';
-  $('myExpList').innerHTML=mine.length?mine.map(e=>expCard(e)).join(''):'<div class="empty">尚無申請紀錄</div>';
+  // 有 canViewAll 權限（老闆/行政主管/會計）看全部員工的代墊，才能審核；員工只看自己的
+  const list=role.canViewAll?S.expenses:mine;
+  $('myExpList').innerHTML=list.length?list.map(e=>expCard(e)).join(''):'<div class="empty">尚無申請紀錄</div>';
 }
 function expCard(e){
   const role=ROLES[S.role];
   const cs=CASES.find(c=>c.id===e.caseId);
-  const st={pending:{l:'待行政核實',c:'pending'},admin_ok:{l:'行政已核實',c:'admin_ok'},approved:{l:'老闆已核准',c:'approved'},rejected:{l:'已拒絕',c:'rejected'},paid:{l:'已撥款 ✅',c:'paid'}};
+  const st={pending:{l:'待審核',c:'pending'},admin_ok:{l:'已核准',c:'approved'},approved:{l:'已核准',c:'approved'},rejected:{l:'已拒絕',c:'rejected'},paid:{l:'已撥款 ✅',c:'paid'}};
   const stInfo=st[e.status]||st.pending;
   let actions='';
-  if(e.status==='pending'&&(S.role==='admin'||S.role==='owner')&&role.canApproveExp)
-    actions+=`<button class="btn-sm approve" onclick="adminApproveExp(${e.id})">✅ 核實</button><button class="btn-sm reject" onclick="rejectExp(${e.id})">❌ 拒絕</button>`;
-  if(e.status==='admin_ok'&&S.role==='owner')
-    actions+=`<button class="btn-sm approve" onclick="finalApproveExp(${e.id})">✅ 最終核准</button><button class="btn-sm reject" onclick="rejectExp(${e.id})">❌ 拒絕</button>`;
-  if(e.status==='approved'&&role.canMarkPaid)
+  // 一關制：老闆／行政主管／會計 任一角色核准即可
+  if(e.status==='pending'&&role.canApproveExp)
+    actions+=`<button class="btn-sm approve" onclick="approveExp(${e.id})">✅ 核准</button><button class="btn-sm reject" onclick="rejectExp(${e.id})">❌ 拒絕</button>`;
+  if(['approved','admin_ok'].includes(e.status)&&role.canMarkPaid)
     actions+=`<button class="btn-sm paid" onclick="markPaid(${e.id})">💸 已撥款</button>`;
   if(e.photoUrl)actions+=`<button class="btn-sm view" onclick="openLightbox('${e.photoUrl}')">🖼️ 照片</button>`;
   return `<div class="exp-card">
@@ -1404,10 +1405,28 @@ function expCard(e){
     ${actions?`<div class="exp-actions">${actions}</div>`:''}
   </div>`;
 }
-function adminApproveExp(id){S.expenses=S.expenses.map(e=>e.id===id?Object.assign({},e,{status:'admin_ok'}):e);renderExpensePage();renderLeaveRecs();toast('✅ 已核實，送老闆最終核准','ok');}
-function finalApproveExp(id){if(S.role!=='owner'){toast('只有老闆可最終核准','err');return;}S.expenses=S.expenses.map(e=>e.id===id?Object.assign({},e,{status:'approved'}):e);renderExpensePage();toast('✅ 已核准，可安排撥款','ok');}
-function rejectExp(id){S.expenses=S.expenses.map(e=>e.id===id?Object.assign({},e,{status:'rejected'}):e);renderExpensePage();toast('已拒絕','warn');}
-function markPaid(id){S.expenses=S.expenses.map(e=>e.id===id?Object.assign({},e,{status:'paid'}):e);renderExpensePage();toast('💸 已標記撥款','ok');}
+async function approveExp(id){
+  if(!ROLES[S.role].canApproveExp){toast('無權限','err');return;}
+  try{ await sbPatch('expenses', id, {status:'approved'}); }catch(err){console.error('代墊核准寫入失敗:',err);toast('儲存失敗，請重試','err');return;}
+  S.expenses=S.expenses.map(e=>e.id===id?Object.assign({},e,{status:'approved'}):e);
+  renderExpensePage();toast('✅ 已核准，將隨薪資撥付','ok');
+  const exp=S.expenses.find(e=>e.id===id);
+  if(exp) sendLineMsg(`✅ 代墊款核准通知\n\n員工：${exp.empName}\n金額：NT$${exp.amount.toLocaleString()}\n審核人：${S.users[S.role].name}（${ROLES[S.role].label}）\n\n款項將隨當月薪資一併撥付`);
+}
+async function rejectExp(id){
+  if(!ROLES[S.role].canApproveExp){toast('無權限','err');return;}
+  try{ await sbPatch('expenses', id, {status:'rejected'}); }catch(err){console.error('代墊拒絕寫入失敗:',err);toast('儲存失敗，請重試','err');return;}
+  S.expenses=S.expenses.map(e=>e.id===id?Object.assign({},e,{status:'rejected'}):e);
+  renderExpensePage();toast('已拒絕','warn');
+  const exp=S.expenses.find(e=>e.id===id);
+  if(exp) sendLineMsg(`❌ 代墊款退回通知\n\n員工：${exp.empName}\n金額：NT$${exp.amount.toLocaleString()}\n\n請確認金額與發票/收據是否相符後重新申請`);
+}
+async function markPaid(id){
+  if(!ROLES[S.role].canMarkPaid){toast('無權限','err');return;}
+  try{ await sbPatch('expenses', id, {status:'paid'}); }catch(err){console.error('撥款標記寫入失敗:',err);toast('儲存失敗，請重試','err');return;}
+  S.expenses=S.expenses.map(e=>e.id===id?Object.assign({},e,{status:'paid'}):e);
+  renderExpensePage();toast('💸 已標記撥款','ok');
+}
 
 /* ════════════════════════════════════════
    員工管理
