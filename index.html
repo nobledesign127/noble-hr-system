@@ -1229,7 +1229,7 @@ function submitLeave(){
   $('lvStart').value=$('lvEnd').value=$('lvReason').value='';
   toast(`📋 ${lt.name}已送出，等待主管核准`,'ok');
 }
-async // 自動每 30 秒刷新請假紀錄
+ // 自動每 30 秒刷新請假紀錄
 setInterval(()=>{
   if($('page-leave') && $('page-leave').classList.contains('active')){
     const u=S.users[S.role];
