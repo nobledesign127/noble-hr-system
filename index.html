@@ -1229,7 +1229,16 @@ function submitLeave(){
   $('lvStart').value=$('lvEnd').value=$('lvReason').value='';
   toast(`📋 ${lt.name}已送出，等待主管核准`,'ok');
 }
-async function reloadLeaves(){
+async // 自動每 30 秒刷新請假紀錄
+setInterval(()=>{
+  if($('page-leave') && $('page-leave').classList.contains('active')){
+    const u=S.users[S.role];
+    const role=ROLES[S.role];
+    loadLeaves(role.canViewAll ? null : u.empId).then(()=>renderLeaveRecs());
+  }
+}, 30000);
+
+function reloadLeaves(){
   const role=ROLES[S.role];
   const u=S.users[S.role];
   toast('載入中…','ok');
