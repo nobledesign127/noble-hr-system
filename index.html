@@ -554,6 +554,13 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
     <label class="f-lbl">到職日</label><input type="date" class="f-input" id="newEmpHire"/>
     <label class="f-lbl">LINE 帳號（選填）</label>
     <input type="text" class="f-input" id="newEmpLine" placeholder="之後補填也可以"/>
+    <label class="f-lbl">系統權限</label>
+    <select class="f-select" id="newEmpSysRole">
+      <option value="員工" selected>員工（打卡、請假、代墊）</option>
+      <option value="行政主管">行政主管（＋審核、排班、報表）</option>
+      <option value="會計">會計（＋薪資、代墊核准與撥款）</option>
+      <option value="老闆">老闆（全部權限）</option>
+    </select>
     <div class="banner info" style="margin-bottom:8px">💡 薪資由會計/老闆另行設定，此處不需填入。</div>
     <button class="btn-sub green" onclick="addEmployee()">建立員工資料 →</button>
   </div>
@@ -1229,7 +1236,7 @@ function submitLeave(){
   $('lvStart').value=$('lvEnd').value=$('lvReason').value='';
   toast(`📋 ${lt.name}已送出，等待主管核准`,'ok');
 }
-async // 自動每 30 秒刷新請假紀錄
+// 自動每 30 秒刷新請假紀錄
 setInterval(()=>{
   if($('page-leave') && $('page-leave').classList.contains('active')){
     const u=S.users[S.role];
@@ -1444,8 +1451,9 @@ function renderEmpList(){
           <span class="emp-st ${e.status}">${e.status==='active'?'在職':'停用'}</span>
         </div>
         <div class="emp-role">${e.role}</div>
-        <div class="emp-hire">到職：${e.hireDate}｜特休 ${calcAnnualLeave(e.hireDate)} 天</div>
+        <div class="emp-hire">到職：${e.hireDate}｜特休 ${calcAnnualLeave(e.hireDate)} 天｜${e.lineId?'🟢 LINE已綁定':'⚪ LINE未綁定'}</div>
         <div class="emp-btns">
+          ${role.canAddEmp?`<button class="emp-btn" style="background:var(--mist);color:var(--ink)" onclick="bindLineId('${e.id}')">🔗 ${e.lineId?'重新綁定':'綁定LINE'}</button>`:''}
           ${role.canEditSalary?`<button class="emp-btn salary" onclick="openSalaryModal('${e.id}')">💰 薪資設定</button>`:''}
           ${role.canDisableEmp&&e.status==='active'?`<button class="emp-btn disable" onclick="disableEmp('${e.id}')">停用</button>`:''}
           ${role.canDisableEmp&&e.status!=='active'?`<button class="emp-btn enable" onclick="enableEmp('${e.id}')">啟用</button>`:''}
@@ -1456,13 +1464,14 @@ function renderEmpList(){
 }
 function addEmployee(){
   const name=$('newEmpName').value.trim(),role=$('newEmpRole').value,
-        hire=$('newEmpHire').value,line=$('newEmpLine').value.trim();
+        hire=$('newEmpHire').value,line=$('newEmpLine').value.trim(),
+        sysRole=$('newEmpSysRole')?$('newEmpSysRole').value:'員工';
   if(!name){toast('請填姓名','err');return;}
   if(!hire){toast('請填到職日','err');return;}
   const newEmp = {
     id:'E'+Date.now(), name, role,
     hire_date: hire, avatar: name.charAt(0),
-    line_id: line || null, system_role: 'staff',
+    line_id: line || null, system_role: sysRole,
     base_salary: 0, status: 'active'
   };
   saveEmployee(newEmp).then(saved => {
@@ -1471,7 +1480,7 @@ function addEmployee(){
         id:saved.id, name:saved.name, role:saved.role,
         hireDate:saved.hire_date, avatar:saved.avatar,
         status:'active', baseSalary:0,
-        lineId:saved.line_id||'', systemRole:'staff'
+        lineId:saved.line_id||'', systemRole:saved.system_role||sysRole
       });
       renderEmpList(); updateMkEmpSelect();
       closeModal('addEmpModal');
@@ -1481,6 +1490,22 @@ function addEmployee(){
       toast('新增失敗，請再試一次','err');
     }
   });
+}
+async function bindLineId(id){
+  if(!ROLES[S.role].canAddEmp){toast('無權限','err');return;}
+  const emp=S.employees.find(x=>x.id===id); if(!emp)return;
+  const input=prompt(`貼上「${emp.name}」的 LINE User ID：\n（員工打開打卡系統，「帳號尚未綁定」畫面截圖裡 U 開頭的那串代碼）`, emp.lineId||'');
+  if(input===null)return;
+  const val=input.trim();
+  if(val && !/^U[0-9a-f]{32}$/i.test(val)){toast('格式不對：應為 U 開頭共 33 碼','err');return;}
+  const saved=await updateEmployee(id,{line_id: val||null});
+  if(saved){
+    S.employees=S.employees.map(x=>x.id===id?Object.assign({},x,{lineId:val}):x);
+    renderEmpList();
+    toast(val?`✅ 已綁定「${emp.name}」的 LINE，請他重開打卡系統`:'已清除綁定','ok');
+  } else {
+    toast('儲存失敗，請重試','err');
+  }
 }
 function disableEmp(id){if(!ROLES[S.role].canDisableEmp){toast('只有老闆可停用','err');return;}S.employees=S.employees.map(x=>x.id===id?Object.assign({},x,{status:'inactive'}):x);renderEmpList();toast('已停用帳號','warn');}
 function enableEmp(id){if(!ROLES[S.role].canDisableEmp){toast('只有老闆可啟用','err');return;}S.employees=S.employees.map(x=>x.id===id?Object.assign({},x,{status:'active'}):x);renderEmpList();toast('已重新啟用','ok');}
