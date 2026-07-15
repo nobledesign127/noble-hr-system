@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-15-A ═══
-     包含: 代墊審核修正/綁定LINE/系統權限/假別餘額(半天制)/請假時限規則/國定假日/停班日按鈕/定位自動重試
+<!-- ═══ NOBLE HR 版本: v2026-07-15-C ═══
+     包含: v-B 全部功能 + 請假自訂時數(補休1.5小時等)
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -372,11 +372,15 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
   <div class="f-grp"><label class="f-lbl">開始日期</label><input type="date" class="f-input" id="lvStart" style="margin-bottom:0"/></div>
   <div class="f-grp"><label class="f-lbl">結束日期</label><input type="date" class="f-input" id="lvEnd" style="margin-bottom:0"/></div>
   <div class="f-grp"><label class="f-lbl">時段（半天以 4 小時計，僅限單日）</label>
-    <select class="f-input" id="lvDayPart" style="margin-bottom:0">
+    <select class="f-input" id="lvDayPart" style="margin-bottom:0" onchange="$('lvCustomWrap').style.display=this.value==='custom'?'block':'none'">
       <option value="full">全天（8 小時）</option>
       <option value="am">上半天 09:00–13:00（4 小時）</option>
       <option value="pm">下半天 14:00–18:00（4 小時）</option>
+      <option value="custom">自訂時數（其他，例如補休 1.5 小時）</option>
     </select>
+  </div>
+  <div class="f-grp" id="lvCustomWrap" style="display:none"><label class="f-lbl">自訂時數（小時，可填小數）</label>
+    <input type="number" class="f-input" id="lvCustomHours" min="0.5" max="8" step="0.5" placeholder="例：1.5" style="margin-bottom:0"/>
   </div>
   <div class="f-grp"><label class="f-lbl">事由（選填）</label><textarea class="f-textarea" id="lvReason" placeholder="例：感冒就醫、家庭事務…"></textarea></div>
   <div id="proofNote" style="display:none;padding:0 14px 8px"><div class="banner buf" style="margin:0">⚠️ 病假需在就診後 3 個工作天內將證明交給 HR，否則轉為事假（無薪）。</div></div>
@@ -529,6 +533,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
     <input type="date" class="f-input" id="suspDate" style="margin-bottom:8px"/>
     <input type="text" class="f-input" id="suspName" placeholder="名稱，例：颱風停班（台北市）" style="margin-bottom:8px"/>
     <button class="btn-sub blue" onclick="addSuspensionDay()" style="width:100%">＋ 新增停班日</button>
+    <div id="suspList" style="margin-top:10px"></div>
   </div>
 </div>
 
@@ -780,13 +785,14 @@ async function saveCheckin(empId, type, lat, lng, officeId, shiftKey) {
 }
 
 // 請假存到 API
-async function saveLeave(empId, leaveType, startDate, endDate, reason, requireProof, dayPart) {
+async function saveLeave(empId, leaveType, startDate, endDate, reason, requireProof, dayPart, customHours) {
   try{
     const data = await sbPost('leave_requests', {
       emp_id: empId, leave_type: leaveType,
       start_date: startDate, end_date: endDate,
       reason: reason || null, require_proof: requireProof || false,
-      day_part: dayPart || 'full'
+      day_part: dayPart || 'full',
+      custom_hours: customHours || null
     });
     return data;
   }catch(e){
@@ -810,6 +816,7 @@ async function loadLeaves(empId) {
           emoji: LEAVE_TYPES.find(l => l.key === r.leave_type)?.emoji || '📋',
           start: r.start_date, end: r.end_date,
           dayPart: r.day_part || 'full',
+          customHours: r.custom_hours ? Number(r.custom_hours) : null,
           reason: r.reason, status: r.status,
           requireProof: r.require_proof,
           empId: r.emp_id,
@@ -888,6 +895,30 @@ async function loadHolidays(){
   }catch(e){ console.error('loadHolidays 錯誤：', e); }
 }
 function isHoliday(dateStr){ return !!(S.holidays && S.holidays[dateStr]); }
+function renderSuspList(){
+  const el=$('suspList'); if(!el)return;
+  const list=Object.entries(S.holidays||{}).filter(([d,h])=>h.type==='suspension')
+    .sort((a,b)=>b[0].localeCompare(a[0]));
+  if(!list.length){el.innerHTML='<div style="font-size:11px;color:#bbb;text-align:center;padding:4px">尚無停班日紀錄</div>';return;}
+  el.innerHTML='<div style="font-size:12px;font-weight:900;margin-bottom:6px;color:#666">已設定的停班日</div>'+
+    list.map(([d,h])=>`
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--mist);border-radius:10px;margin-bottom:6px">
+        <div style="flex:1;font-size:12px"><b>${d}</b>　${h.name}</div>
+        <button onclick="deleteSuspension(${h.id},'${d}')" style="border:none;background:#fee;color:#c33;border-radius:8px;padding:5px 10px;font-size:11px;font-weight:900">刪除</button>
+      </div>`).join('');
+}
+async function deleteSuspension(id,date){
+  if(!(S.role==='owner'||S.role==='accounting')){toast('僅老闆與會計可操作','err');return;}
+  if(!confirm(`確定刪除 ${date} 的停班日設定？`))return;
+  try{
+    const res=await fetch(SB_URL+'/rest/v1/holidays?id=eq.'+id,{
+      method:'DELETE',
+      headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Prefer':'return=minimal'}
+    });
+    if(res.ok){ delete S.holidays[date]; renderSuspList(); toast('已刪除','ok'); }
+    else toast('刪除失敗，請重試','err');
+  }catch(e){ toast('刪除失敗，請重試','err'); }
+}
 async function addSuspensionDay(){
   if(!(S.role==='owner'||S.role==='accounting')){toast('僅老闆與會計可設定停班日','err');return;}
   const date=$('suspDate').value, name=$('suspName').value.trim()||'停班日';
@@ -897,6 +928,7 @@ async function addSuspensionDay(){
     const saved=await sbPost('holidays',{date, name, type:'suspension'});
     if(saved){
       S.holidays[date]={name, type:'suspension', id:saved.id};
+      renderSuspList();
       toast(`✅ 已設定 ${date} ${name}，當日不計遲到`,'ok');
       sendLineMsg(`📢 停班公告\n\n${date}（${name}）\n當日不需打卡、不計遲到。`);
       $('suspName').value='';
@@ -1295,9 +1327,11 @@ function calcLeaveBalance(empId,hireDate){
   const entitle=calcAnnualLeave(hd);
   const entitleH=entitle*8;
   const [ws,we]=annualWindow(hd);
-  const partH=r=>(r.dayPart==='am'||r.dayPart==='pm')?4:8;
+  const partH=r=>r.dayPart==='custom'?(Number(r.customHours)||0):((r.dayPart==='am'||r.dayPart==='pm')?4:8);
+  const recH=r=>r.dayPart==='custom'?(Number(r.customHours)||0):weekdaysBetween(r.start,r.end)*partH(r);
   let usedAnnualH=0;
   S.leaveRecords.filter(r=>r.empId===empId&&r.type==='annual'&&r.status==='approved').forEach(r=>{
+    if(r.dayPart==='custom'){usedAnnualH+=recH(r);return;}
     const s=new Date(r.start)<ws?ws:new Date(r.start);
     const e=new Date(r.end)>we?we:new Date(r.end);
     if(s<=e)usedAnnualH+=weekdaysBetween(s,e)*partH(r);
@@ -1305,7 +1339,7 @@ function calcLeaveBalance(empId,hireDate){
   // 補休半年內有效：只計最近 6 個月的加班與補休
   const sixAgo=new Date();sixAgo.setMonth(sixAgo.getMonth()-6);sixAgo.setHours(0,0,0,0);
   const compEarnedH=S.overtimes.filter(o=>o.empId===empId&&o.status==='approved'&&new Date(o.date)>=sixAgo).reduce((t,o)=>t+(Number(o.hours)||0),0);
-  const compUsedH=S.leaveRecords.filter(r=>r.empId===empId&&r.type==='comp'&&r.status==='approved'&&new Date(r.start)>=sixAgo).reduce((t,r)=>t+weekdaysBetween(r.start,r.end)*partH(r),0);
+  const compUsedH=S.leaveRecords.filter(r=>r.empId===empId&&r.type==='comp'&&r.status==='approved'&&new Date(r.start)>=sixAgo).reduce((t,r)=>t+recH(r),0);
   return {entitle,entitleH,usedAnnualH,annualRemainH:entitleH-usedAnnualH,compEarnedH,compUsedH,compRemainH:compEarnedH-compUsedH};
 }
 function fmtDaysH(h){
@@ -1351,7 +1385,12 @@ function submitLeave(){
   console.log('請假申請：empId=', u.empId, 'role=', S.role, 'type=', S.leaveType);
   if(!u.empId){toast('身份識別失敗，請重新開啟系統','err');return;}
   const dayPart=$('lvDayPart')?$('lvDayPart').value:'full';
-  if(dayPart!=='full'&&start!==end){toast('半天請假僅限單日，跨日請選全天','err');return;}
+  if(dayPart!=='full'&&start!==end){toast('半天或自訂時數僅限單日，跨日請選全天','err');return;}
+  let customHours=null;
+  if(dayPart==='custom'){
+    customHours=parseFloat($('lvCustomHours').value);
+    if(!customHours||customHours<=0||customHours>8){toast('請填自訂時數（0.5～8 小時）','err');return;}
+  }
   // 申請時限規則檢查（違反時警告並標注，由主管特別核准）
   let ruleFlag='';
   const todayD=new Date();todayD.setHours(0,0,0,0);
@@ -1366,7 +1405,7 @@ function submitLeave(){
     ruleFlag='⚠️ 臨時申請（未於一週前提出），需特別核准';
   }
   // 餘額檢查：超過剩餘額度時警告（仍可送出，由審核者決定）
-  const reqH=weekdaysBetween(start,end)*(dayPart==='full'?8:4);
+  const reqH=dayPart==='custom'?customHours:weekdaysBetween(start,end)*(dayPart==='full'?8:4);
   if(S.leaveType==='annual'){
     const bal=calcLeaveBalance(u.empId,u.hireDate);
     if(reqH>bal.annualRemainH&&!confirm(`⚠️ 特休僅剩 ${fmtDaysH(bal.annualRemainH)}，本次申請 ${fmtDaysH(reqH)} 已超過額度。\n仍要送出申請嗎？`))return;
@@ -1376,11 +1415,11 @@ function submitLeave(){
     if(reqH>bal.compRemainH&&!confirm(`⚠️ 補休僅剩 ${bal.compRemainH} 小時，本次申請 ${reqH} 小時已超過額度。\n仍要送出申請嗎？`))return;
   }
   // 存到後端
-  saveLeave(u.empId, S.leaveType, start, end, reason, lt.requireProof, dayPart).then(saved => {
+  saveLeave(u.empId, S.leaveType, start, end, reason, lt.requireProof, dayPart, customHours).then(saved => {
     if(saved && saved.id){
       S.leaveRecords.unshift({
         id:saved.id, type:lt.key, name:lt.name, emoji:lt.emoji,
-        start, end, dayPart, reason, status:'pending',
+        start, end, dayPart, customHours, reason, status:'pending',
         requireProof:lt.requireProof, empId:u.empId
       });
       renderLeaveRecs(); renderLeaveGrid();
@@ -1390,7 +1429,7 @@ function submitLeave(){
   });
   // 直接發 LINE 通知給老闆
   const leaveMap={annual:'特休',sick:'病假',menstrual:'生理假',personal:'事假',comp:'補休',checkup:'產檢假'};
-  const partMap={full:'全天',am:'上半天 09:00–13:00',pm:'下半天 14:00–18:00'};
+  const partMap={full:'全天',am:'上半天 09:00–13:00',pm:'下半天 14:00–18:00',custom:`自訂 ${customHours||''} 小時`};
   sendLineMsg(`📋 請假申請通知\n\n員工：${u.name}\n假別：${leaveMap[S.leaveType]||S.leaveType}\n日期：${start} ～ ${end}\n時段：${partMap[dayPart]||'全天'}${reason?'\n事由：'+reason:''}${ruleFlag?'\n\n'+ruleFlag:''}\n\n請至系統審核 👉\nhttps://liff.line.me/2010371976-U8wLomXx`);
   $('lvStart').value=$('lvEnd').value=$('lvReason').value='';
   toast(`📋 ${lt.name}已送出，等待主管核准`,'ok');
@@ -1432,7 +1471,7 @@ function renderLeaveRecs(){
       <div class="lr-info">
         ${role.canViewAll?`<div style="font-size:10px;color:var(--purple);font-weight:700;margin-bottom:2px">${emp?.name||''}</div>`:''}
         <div class="lr-type">${r.name}</div>
-        <div class="lr-dates">${r.start} ～ ${r.end}${r.dayPart==='am'?'｜上半天':r.dayPart==='pm'?'｜下半天':''}${r.reason?' ｜'+r.reason:''}</div>
+        <div class="lr-dates">${r.start} ～ ${r.end}${r.dayPart==='am'?'｜上半天':r.dayPart==='pm'?'｜下半天':r.dayPart==='custom'?`｜${r.customHours||''} 小時`:''}${r.reason?' ｜'+r.reason:''}</div>
         ${r.requireProof&&r.status==='approved'?`<div class="lr-proof">📎 請補交就醫證明給 HR</div>`:''}
         ${actions}
       </div>
@@ -1602,7 +1641,7 @@ function renderEmpList(){
   $('empSub').textContent=role.canDisableEmp?'新增員工（停用需老闆操作）':role.canAddEmp?'可新增員工，停用需老闆':'查看員工資料';
   $('empAddBtn').innerHTML=role.canAddEmp?`<button class="btn-sub blue" onclick="openModal('addEmpModal')">＋ 新增員工</button>`:'';
   const susp=$('suspSection');
-  if(susp){ susp.style.display=(S.role==='owner'||S.role==='accounting')?'block':'none'; if(!$('suspDate').value)$('suspDate').value=today(); }
+  if(susp){ susp.style.display=(S.role==='owner'||S.role==='accounting')?'block':'none'; if(!$('suspDate').value)$('suspDate').value=today(); renderSuspList(); }
   $('empList').innerHTML=S.employees.map((e,i)=>`
     <div class="emp-card">
       <div class="emp-av" style="background:${EMP_COLORS[i%EMP_COLORS.length]};color:var(--dark)">${e.avatar}</div>
