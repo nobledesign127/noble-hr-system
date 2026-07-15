@@ -1,4 +1,7 @@
 <!DOCTYPE html>
+<!-- ═══ NOBLE HR 版本: v2026-07-15-A ═══
+     包含: 代墊審核修正/綁定LINE/系統權限/假別餘額(半天制)/請假時限規則/國定假日/停班日按鈕/定位自動重試
+     部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8"/>
@@ -274,6 +277,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 <!-- ════ PAGE: 打卡 ════ -->
 <div class="page active" id="page-home">
   <div class="clock-hero">
+    <div id="holidayBanner" style="display:none;background:linear-gradient(135deg,#fef3c7,#fde68a);border-radius:12px;padding:12px 14px;margin-bottom:12px;font-size:13px;font-weight:900;color:#92400e;text-align:center"></div>
     <div class="clk-date" id="clkDate"></div>
     <div class="clk-time" id="clkTime">--:--:--</div>
     <div class="clk-day"  id="clkDay"></div>
@@ -367,6 +371,13 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
   <div class="banner ok" id="proofBanner" style="margin:0 14px 8px;display:none">📎 此假別需附就醫證明，核准後請盡快補交 HR。</div>
   <div class="f-grp"><label class="f-lbl">開始日期</label><input type="date" class="f-input" id="lvStart" style="margin-bottom:0"/></div>
   <div class="f-grp"><label class="f-lbl">結束日期</label><input type="date" class="f-input" id="lvEnd" style="margin-bottom:0"/></div>
+  <div class="f-grp"><label class="f-lbl">時段（半天以 4 小時計，僅限單日）</label>
+    <select class="f-input" id="lvDayPart" style="margin-bottom:0">
+      <option value="full">全天（8 小時）</option>
+      <option value="am">上半天 09:00–13:00（4 小時）</option>
+      <option value="pm">下半天 14:00–18:00（4 小時）</option>
+    </select>
+  </div>
   <div class="f-grp"><label class="f-lbl">事由（選填）</label><textarea class="f-textarea" id="lvReason" placeholder="例：感冒就醫、家庭事務…"></textarea></div>
   <div id="proofNote" style="display:none;padding:0 14px 8px"><div class="banner buf" style="margin:0">⚠️ 病假需在就診後 3 個工作天內將證明交給 HR，否則轉為事假（無薪）。</div></div>
   <div class="f-grp"><button class="btn-sub green" onclick="submitLeave()">送出申請 →</button></div>
@@ -512,6 +523,13 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
   <div class="pg-sub" id="empSub"></div>
   <div style="padding:0 14px 10px" id="empAddBtn"></div>
   <div style="padding:0 14px" id="empList"><div class="empty">載入中…</div></div>
+  <div id="suspSection" style="display:none;margin:14px;padding:14px;background:var(--white);border-radius:14px;box-shadow:0 4px 20px rgba(0,0,0,.07)">
+    <div style="font-size:13px;font-weight:900;margin-bottom:8px">📢 設定停班日（颱風／政府公告）</div>
+    <div style="font-size:11px;color:#999;margin-bottom:10px">當日不計遲到與全勤，並發 LINE 公告通知</div>
+    <input type="date" class="f-input" id="suspDate" style="margin-bottom:8px"/>
+    <input type="text" class="f-input" id="suspName" placeholder="名稱，例：颱風停班（台北市）" style="margin-bottom:8px"/>
+    <button class="btn-sub blue" onclick="addSuspensionDay()" style="width:100%">＋ 新增停班日</button>
+  </div>
 </div>
 
 <!-- ════ PAGE: 薪資 ════ -->
@@ -625,6 +643,7 @@ const LEAVE_TYPES = [
   {key:'menstrual',name:'生理假',emoji:'🌸',note:'', requireProof:false,yearLimit:null,monthlyCap:null},
   {key:'personal', name:'事假',  emoji:'📝',note:'', requireProof:false,yearLimit:null,monthlyCap:null},
   {key:'comp',     name:'補休',  emoji:'🔁',note:'', requireProof:false,yearLimit:null,monthlyCap:null},
+  // {key:'checkup',name:'產檢假',emoji:'🤰',note:'需證明',requireProof:true,yearLimit:null,monthlyCap:null}, // 7天全薪(性平法§15)，需要時取消註解即可啟用
   // {key:'funeral',name:'喪假',emoji:'🕯️',note:'全薪',requireProof:true,yearLimit:8,monthlyCap:null},
   // {key:'marriage',name:'婚假',emoji:'💍',note:'全薪',requireProof:true,yearLimit:8,monthlyCap:null},
 ];
@@ -761,12 +780,13 @@ async function saveCheckin(empId, type, lat, lng, officeId, shiftKey) {
 }
 
 // 請假存到 API
-async function saveLeave(empId, leaveType, startDate, endDate, reason, requireProof) {
+async function saveLeave(empId, leaveType, startDate, endDate, reason, requireProof, dayPart) {
   try{
     const data = await sbPost('leave_requests', {
       emp_id: empId, leave_type: leaveType,
       start_date: startDate, end_date: endDate,
-      reason: reason || null, require_proof: requireProof || false
+      reason: reason || null, require_proof: requireProof || false,
+      day_part: dayPart || 'full'
     });
     return data;
   }catch(e){
@@ -789,6 +809,7 @@ async function loadLeaves(empId) {
           name: LEAVE_TYPES.find(l => l.key === r.leave_type)?.name || r.leave_type,
           emoji: LEAVE_TYPES.find(l => l.key === r.leave_type)?.emoji || '📋',
           start: r.start_date, end: r.end_date,
+          dayPart: r.day_part || 'full',
           reason: r.reason, status: r.status,
           requireProof: r.require_proof,
           empId: r.emp_id,
@@ -842,6 +863,47 @@ async function updateEmployee(id, updateData) {
   catch(e){ console.error('updateEmployee 錯誤：', e); return null; }
 }
 
+async function loadOvertimes(){
+  try{
+    const data = await api('GET','/api/overtimes');
+    if(data && Array.isArray(data)){
+      S.overtimes = data.map(o=>({
+        id:o.id, empId:o.emp_id, empName:o.emp_name,
+        date:o.date, siteName:o.site_name,
+        startTime:o.start_time, endTime:o.end_time,
+        hours:Number(o.hours)||0, reason:o.reason,
+        status:o.status||'pending', createdAt:o.created_at
+      }));
+    }
+  }catch(e){ console.error('loadOvertimes 錯誤：', e); }
+}
+
+async function loadHolidays(){
+  try{
+    const data = await sbGet('holidays', {'order':'date.asc'});
+    if(data && Array.isArray(data)){
+      S.holidays = {};
+      data.forEach(h=>{ S.holidays[h.date] = {name:h.name, type:h.type, id:h.id}; });
+    }
+  }catch(e){ console.error('loadHolidays 錯誤：', e); }
+}
+function isHoliday(dateStr){ return !!(S.holidays && S.holidays[dateStr]); }
+async function addSuspensionDay(){
+  if(!(S.role==='owner'||S.role==='accounting')){toast('僅老闆與會計可設定停班日','err');return;}
+  const date=$('suspDate').value, name=$('suspName').value.trim()||'停班日';
+  if(!date){toast('請選日期','err');return;}
+  if(isHoliday(date)){toast('該日已是假日／停班日','warn');return;}
+  try{
+    const saved=await sbPost('holidays',{date, name, type:'suspension'});
+    if(saved){
+      S.holidays[date]={name, type:'suspension', id:saved.id};
+      toast(`✅ 已設定 ${date} ${name}，當日不計遲到`,'ok');
+      sendLineMsg(`📢 停班公告\n\n${date}（${name}）\n當日不需打卡、不計遲到。`);
+      $('suspName').value='';
+    } else toast('儲存失敗，請重試','err');
+  }catch(e){ toast('儲存失敗，請重試','err'); }
+}
+
 /* ════════════════════════════════════════
    State
 ════════════════════════════════════════ */
@@ -876,6 +938,7 @@ const S = {
   ],
   expNextId:4, salaryModalEmpId:null, photoDataUrl:null,
   overtimes:[],
+  holidays:{},
   currentExpMonth: new Date().toISOString().slice(0,7),
 };
 
@@ -1009,10 +1072,14 @@ const OFFICES=[
   {id:'xinyi',name:'高尚空間設計',lat:25.0360282,lng:121.5604536},
   {id:'remote',name:'遠端辦公',lat:null,lng:null}
 ];
+let gpsTries=0;
 function getGPS(){
   setGps('loading','取得位置中…','');
   if(!navigator.geolocation){setGps('fail','不支援GPS','');return;}
+  // 第 1-2 次用高精度；第 3 次起改用快速模式（WiFi/基地台定位，室內較穩）
+  const highAcc=gpsTries<2;
   navigator.geolocation.getCurrentPosition(pos=>{
+    gpsTries=0;
     const{latitude:la,longitude:lo,accuracy:ac}=pos.coords; S.gps={la,lo,ac};
     const near=OFFICES.filter(o=>o.lat).map(o=>({o,d:hav(la,lo,o.lat,o.lng)})).sort((a,b)=>a.d-b.d)[0];
     const d=near?.d??0; const inRange=near&&d<=150; const hasRemote=OFFICES.some(o=>!o.lat);
@@ -1020,9 +1087,20 @@ function getGPS(){
     $('mapCoords').textContent=`${la.toFixed(6)}, ${lo.toFixed(6)}  ±${Math.round(ac)}m`;
     if(inRange||hasRemote){setGps('ok',inRange?`已進入 ${near.o.name}`:'遠端辦公','');enableBtn();}
     else{setGps('fail',`超出範圍 ${d-150}m`,`${d}m`);$('btnClock').disabled=true;}
-  },err=>{const m={1:'請允許位置權限',2:'GPS 訊號弱',3:'定位逾時'};setGps('fail',m[err.code]||'定位失敗','');},{enableHighAccuracy:true,timeout:10000,maximumAge:0});
+  },err=>{
+    gpsTries++;
+    if(err.code!==1&&gpsTries<4){
+      // 訊號弱或逾時：自動重試（最多 3 次）
+      setGps('loading',`定位中…重試第 ${gpsTries} 次`,'');
+      setTimeout(getGPS,1200);
+    }else{
+      const m={1:'請允許位置權限後點此重試',2:'GPS 訊號弱，點此重試',3:'定位逾時，點此重試'};
+      setGps('fail',m[err.code]||'定位失敗，點此重試','');
+      gpsTries=0;
+    }
+  },{enableHighAccuracy:highAcc,timeout:highAcc?10000:15000,maximumAge:30000});
 }
-function setGps(cls,txt,dist){$('gpsBar').className='gps-bar '+cls;$('gpsText').textContent=txt;$('gpsDist').textContent=dist;}
+function setGps(cls,txt,dist){$('gpsBar').className='gps-bar '+cls;$('gpsText').textContent=txt;$('gpsDist').textContent=dist;$('gpsBar').onclick=cls==='fail'?()=>{gpsTries=0;getGPS();}:null;}
 function enableBtn(){
   const b=$('btnClock'),sh=getShift(); b.disabled=false;
   if(S.clockedIn){b.className='btn-clock out';$('btnIcon').textContent='🔴';$('btnLabel').textContent='下班打卡';}
@@ -1194,12 +1272,67 @@ function calcAnnualLeave(h){
   if(months<6)return 0;if(months<12)return 3;const y=Math.floor(months/12);
   if(y<2)return 7;if(y<3)return 10;if(y<5)return 14;if(y<10)return 15;return Math.min(15+(y-10),30);
 }
+/* ── 假別餘額（特休週年制、補休 1:1）── */
+function weekdaysBetween(s,e){
+  let c=0;const d=new Date(s),end=new Date(e);
+  while(d<=end){
+    const w=d.getDay();
+    const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    if(w!==0&&w!==6&&!isHoliday(ds))c++;
+    d.setDate(d.getDate()+1);
+  }
+  return c;
+}
+function annualWindow(hireDate){
+  const h=new Date(hireDate),t=new Date();
+  let s=new Date(t.getFullYear(),h.getMonth(),h.getDate());
+  if(s>t)s=new Date(t.getFullYear()-1,h.getMonth(),h.getDate());
+  const e=new Date(s);e.setFullYear(e.getFullYear()+1);e.setDate(e.getDate()-1);
+  return [s,e];
+}
+function calcLeaveBalance(empId,hireDate){
+  const hd=hireDate||'2024-01-15';
+  const entitle=calcAnnualLeave(hd);
+  const entitleH=entitle*8;
+  const [ws,we]=annualWindow(hd);
+  const partH=r=>(r.dayPart==='am'||r.dayPart==='pm')?4:8;
+  let usedAnnualH=0;
+  S.leaveRecords.filter(r=>r.empId===empId&&r.type==='annual'&&r.status==='approved').forEach(r=>{
+    const s=new Date(r.start)<ws?ws:new Date(r.start);
+    const e=new Date(r.end)>we?we:new Date(r.end);
+    if(s<=e)usedAnnualH+=weekdaysBetween(s,e)*partH(r);
+  });
+  // 補休半年內有效：只計最近 6 個月的加班與補休
+  const sixAgo=new Date();sixAgo.setMonth(sixAgo.getMonth()-6);sixAgo.setHours(0,0,0,0);
+  const compEarnedH=S.overtimes.filter(o=>o.empId===empId&&o.status==='approved'&&new Date(o.date)>=sixAgo).reduce((t,o)=>t+(Number(o.hours)||0),0);
+  const compUsedH=S.leaveRecords.filter(r=>r.empId===empId&&r.type==='comp'&&r.status==='approved'&&new Date(r.start)>=sixAgo).reduce((t,r)=>t+weekdaysBetween(r.start,r.end)*partH(r),0);
+  return {entitle,entitleH,usedAnnualH,annualRemainH:entitleH-usedAnnualH,compEarnedH,compUsedH,compRemainH:compEarnedH-compUsedH};
+}
+function fmtDaysH(h){
+  const d=Math.floor(h/8),r=h%8;
+  if(d>0&&r>0)return `${d} 天 ${r} 小時`;
+  if(d>0)return `${d} 天`;
+  return `${r} 小時`;
+}
+function empBalStr(e){
+  const b=calcLeaveBalance(e.id,e.hireDate);
+  return `特休剩 ${fmtDaysH(b.annualRemainH)}／共 ${b.entitle} 天｜補休剩 ${b.compRemainH} 小時`;
+}
 function renderLeaveGrid(){
-  const u=S.users[S.role];const annual=calcAnnualLeave(u.hireDate||'2024-01-15');
+  const u=S.users[S.role];
+  const bal=calcLeaveBalance(u.empId,u.hireDate);
   $('leaveGrid').innerHTML=LEAVE_TYPES.map(lt=>{
+    let extra='';
+    if(lt.key==='annual')extra=`<div class="lc-note" style="color:${bal.annualRemainH>0?'var(--green)':'var(--orange)'};font-weight:900">剩 ${fmtDaysH(bal.annualRemainH)}</div>`;
+    if(lt.key==='comp')extra=`<div class="lc-note" style="color:${bal.compRemainH>0?'var(--green)':'var(--orange)'};font-weight:900">剩 ${bal.compRemainH} 小時</div>`;
+    if(lt.key==='checkup'){
+      const usedH=S.leaveRecords.filter(r=>r.empId===u.empId&&r.type==='checkup'&&r.status==='approved').reduce((t,r)=>t+weekdaysBetween(r.start,r.end)*((r.dayPart==='am'||r.dayPart==='pm')?4:8),0);
+      const remH=Math.max(0,56-usedH);
+      extra=`<div class="lc-note" style="color:${remH>0?'var(--green)':'var(--orange)'};font-weight:900">剩 ${fmtDaysH(remH)}／共 7 天</div>`;
+    }
     return `<div class="leave-card ${lt.key===S.leaveType?'sel':''}" onclick="selectLeave('${lt.key}')">
       <div class="lc-emoji">${lt.emoji}</div><div class="lc-name">${lt.name}</div>
-      ${lt.requireProof?`<div class="lc-note">需證明</div>`:''}
+      ${lt.requireProof?`<div class="lc-note">需證明</div>`:''}${extra}
     </div>`;
   }).join('');
 }
@@ -1217,12 +1350,37 @@ function submitLeave(){
   const u=S.users[S.role];
   console.log('請假申請：empId=', u.empId, 'role=', S.role, 'type=', S.leaveType);
   if(!u.empId){toast('身份識別失敗，請重新開啟系統','err');return;}
+  const dayPart=$('lvDayPart')?$('lvDayPart').value:'full';
+  if(dayPart!=='full'&&start!==end){toast('半天請假僅限單日，跨日請選全天','err');return;}
+  // 申請時限規則檢查（違反時警告並標注，由主管特別核准）
+  let ruleFlag='';
+  const todayD=new Date();todayD.setHours(0,0,0,0);
+  const startD=new Date(start);
+  const daysAhead=Math.round((startD-todayD)/86400000);
+  const spanDays=Math.round((new Date(end)-startD)/86400000)+1;
+  if(['personal','annual'].includes(S.leaveType)&&spanDays>3&&daysAhead<90){
+    if(!confirm(`⚠️ 連續請假超過 3 天，依規定需於三個月前申請。\n本次未達期限，需主管特別核准。\n仍要送出申請嗎？`))return;
+    ruleFlag='⚠️ 連續超過 3 天且未於三個月前申請，需特別核准';
+  } else if(S.leaveType==='personal'&&daysAhead<7){
+    if(!confirm(`⚠️ 事假依規定需於一週前申請。\n臨時請假需主管特別核准。\n仍要送出申請嗎？`))return;
+    ruleFlag='⚠️ 臨時申請（未於一週前提出），需特別核准';
+  }
+  // 餘額檢查：超過剩餘額度時警告（仍可送出，由審核者決定）
+  const reqH=weekdaysBetween(start,end)*(dayPart==='full'?8:4);
+  if(S.leaveType==='annual'){
+    const bal=calcLeaveBalance(u.empId,u.hireDate);
+    if(reqH>bal.annualRemainH&&!confirm(`⚠️ 特休僅剩 ${fmtDaysH(bal.annualRemainH)}，本次申請 ${fmtDaysH(reqH)} 已超過額度。\n仍要送出申請嗎？`))return;
+  }
+  if(S.leaveType==='comp'){
+    const bal=calcLeaveBalance(u.empId,u.hireDate);
+    if(reqH>bal.compRemainH&&!confirm(`⚠️ 補休僅剩 ${bal.compRemainH} 小時，本次申請 ${reqH} 小時已超過額度。\n仍要送出申請嗎？`))return;
+  }
   // 存到後端
-  saveLeave(u.empId, S.leaveType, start, end, reason, lt.requireProof).then(saved => {
+  saveLeave(u.empId, S.leaveType, start, end, reason, lt.requireProof, dayPart).then(saved => {
     if(saved && saved.id){
       S.leaveRecords.unshift({
         id:saved.id, type:lt.key, name:lt.name, emoji:lt.emoji,
-        start, end, reason, status:'pending',
+        start, end, dayPart, reason, status:'pending',
         requireProof:lt.requireProof, empId:u.empId
       });
       renderLeaveRecs(); renderLeaveGrid();
@@ -1231,8 +1389,9 @@ function submitLeave(){
     }
   });
   // 直接發 LINE 通知給老闆
-  const leaveMap={annual:'特休',sick:'病假',menstrual:'生理假',personal:'事假',comp:'補休'};
-  sendLineMsg(`📋 請假申請通知\n\n員工：${u.name}\n假別：${leaveMap[S.leaveType]||S.leaveType}\n日期：${start} ～ ${end}${reason?'\n事由：'+reason:''}\n\n請至系統審核 👉\nhttps://liff.line.me/2010371976-U8wLomXx`);
+  const leaveMap={annual:'特休',sick:'病假',menstrual:'生理假',personal:'事假',comp:'補休',checkup:'產檢假'};
+  const partMap={full:'全天',am:'上半天 09:00–13:00',pm:'下半天 14:00–18:00'};
+  sendLineMsg(`📋 請假申請通知\n\n員工：${u.name}\n假別：${leaveMap[S.leaveType]||S.leaveType}\n日期：${start} ～ ${end}\n時段：${partMap[dayPart]||'全天'}${reason?'\n事由：'+reason:''}${ruleFlag?'\n\n'+ruleFlag:''}\n\n請至系統審核 👉\nhttps://liff.line.me/2010371976-U8wLomXx`);
   $('lvStart').value=$('lvEnd').value=$('lvReason').value='';
   toast(`📋 ${lt.name}已送出，等待主管核准`,'ok');
 }
@@ -1273,7 +1432,7 @@ function renderLeaveRecs(){
       <div class="lr-info">
         ${role.canViewAll?`<div style="font-size:10px;color:var(--purple);font-weight:700;margin-bottom:2px">${emp?.name||''}</div>`:''}
         <div class="lr-type">${r.name}</div>
-        <div class="lr-dates">${r.start} ～ ${r.end}${r.reason?' ｜'+r.reason:''}</div>
+        <div class="lr-dates">${r.start} ～ ${r.end}${r.dayPart==='am'?'｜上半天':r.dayPart==='pm'?'｜下半天':''}${r.reason?' ｜'+r.reason:''}</div>
         ${r.requireProof&&r.status==='approved'?`<div class="lr-proof">📎 請補交就醫證明給 HR</div>`:''}
         ${actions}
       </div>
@@ -1442,6 +1601,8 @@ function renderEmpList(){
   const role=ROLES[S.role];
   $('empSub').textContent=role.canDisableEmp?'新增員工（停用需老闆操作）':role.canAddEmp?'可新增員工，停用需老闆':'查看員工資料';
   $('empAddBtn').innerHTML=role.canAddEmp?`<button class="btn-sub blue" onclick="openModal('addEmpModal')">＋ 新增員工</button>`:'';
+  const susp=$('suspSection');
+  if(susp){ susp.style.display=(S.role==='owner'||S.role==='accounting')?'block':'none'; if(!$('suspDate').value)$('suspDate').value=today(); }
   $('empList').innerHTML=S.employees.map((e,i)=>`
     <div class="emp-card">
       <div class="emp-av" style="background:${EMP_COLORS[i%EMP_COLORS.length]};color:var(--dark)">${e.avatar}</div>
@@ -1451,7 +1612,7 @@ function renderEmpList(){
           <span class="emp-st ${e.status}">${e.status==='active'?'在職':'停用'}</span>
         </div>
         <div class="emp-role">${e.role}</div>
-        <div class="emp-hire">到職：${e.hireDate}｜特休 ${calcAnnualLeave(e.hireDate)} 天｜${e.lineId?'🟢 LINE已綁定':'⚪ LINE未綁定'}</div>
+        <div class="emp-hire">到職：${e.hireDate}｜${empBalStr(e)}｜${e.lineId?'🟢 LINE已綁定':'⚪ LINE未綁定'}</div>
         <div class="emp-btns">
           ${role.canAddEmp?`<button class="emp-btn" style="background:var(--mist);color:var(--ink)" onclick="bindLineId('${e.id}')">🔗 ${e.lineId?'重新綁定':'綁定LINE'}</button>`:''}
           ${role.canEditSalary?`<button class="emp-btn salary" onclick="openSalaryModal('${e.id}')">💰 薪資設定</button>`:''}
@@ -1799,6 +1960,18 @@ async function initLIFF(){
   // 載入員工資料後再初始化 LIFF
   loadEmployees().then(()=>{
     initLIFF();
+    loadOvertimes().then(()=>{ try{renderOvertimePage();renderLeaveGrid();}catch(e){} });
+    loadHolidays().then(()=>{
+      try{
+        const h=S.holidays&&S.holidays[today()];
+        if(h){
+          const hb=$('holidayBanner');
+          hb.textContent=(h.type==='suspension'?'📢 今日停班：':'🎉 今日國定假日：')+h.name+'，不需打卡、不計遲到';
+          hb.style.display='block';
+        }
+        renderLeaveGrid();
+      }catch(e){}
+    });
   }).catch(()=>{
     initLIFF();
   });
