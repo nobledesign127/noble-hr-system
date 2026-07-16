@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-15-G ═══
-     包含: v-F 基礎, 行政主管可見到職日與假別餘額(薪資仍限老闆會計)
+<!-- ═══ NOBLE HR 版本: v2026-07-15-H ═══
+     包含: v-G 基礎 + 安全修復(LIFF錯誤不再露出老闆介面)
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -1991,9 +1991,20 @@ async function initLIFF(){
     console.log('LINE 登入：', lineUserId);
   } catch(e){
     console.log('LIFF 錯誤', e.message);
-    // 即使出錯，在 LIFF 環境下也不顯示角色切換器
+    // 安全防護：LIFF 載入異常時一律降到最低權限並鎖住畫面，避免露出老闆介面
     if(typeof liff !== 'undefined'){
       document.getElementById('roleSw').style.display='none';
+      setRole('staff');
+      ['nav-schedule','nav-leave','nav-expense','nav-overtime','nav-employees','nav-salary'].forEach(id=>{ var el=$(id); if(el) el.style.display='none'; });
+      var hero=document.querySelector('.clock-hero');
+      if(hero){
+        hero.innerHTML=`
+          <div style="text-align:center;padding:40px 10px">
+            <div style="font-size:44px;margin-bottom:12px">⚠️</div>
+            <div style="font-size:16px;font-weight:900;color:var(--ink);margin-bottom:8px">系統載入異常</div>
+            <div style="font-size:13px;color:#888;line-height:1.7">請完全關閉 LINE 後重新開啟打卡系統<br>若持續發生請聯絡管理者</div>
+          </div>`;
+      }
     } else {
       document.getElementById('roleSw').style.display='flex';
     }
