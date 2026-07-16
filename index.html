@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-15-C ═══
-     包含: v-B 全部功能 + 請假自訂時數(補休1.5小時等)
+<!-- ═══ NOBLE HR 版本: v2026-07-15-G ═══
+     包含: v-F 基礎, 行政主管可見到職日與假別餘額(薪資仍限老闆會計)
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -986,13 +986,15 @@ function setRole(r){
   $('uName').textContent=user.name;
   $('uBadge').textContent=role.label; $('uBadge').style.background=role.color; $('uBadge').style.color=role.tc;
   $('nav-employees').style.display=(role.canAddEmp||role.canViewAll)?'flex':'none';
+  // 排班功能開關：全公司標準班暫不需要，要啟用改成 true 即可
+  const SHOW_SCHEDULE=false;
   // 員工：打卡+請假+代墊，不看排班和薪資
   if(role.key==='staff'){
     $('nav-schedule').style.display='none';
     $('nav-leave').style.display='flex';
     $('nav-salary').style.display='none';
   } else {
-    $('nav-schedule').style.display='flex';
+    $('nav-schedule').style.display=SHOW_SCHEDULE?'flex':'none';
     $('nav-leave').style.display='flex';
     $('nav-salary').style.display='flex';
   }
@@ -1707,8 +1709,20 @@ async function bindLineId(id){
     toast('儲存失敗，請重試','err');
   }
 }
-function disableEmp(id){if(!ROLES[S.role].canDisableEmp){toast('只有老闆可停用','err');return;}S.employees=S.employees.map(x=>x.id===id?Object.assign({},x,{status:'inactive'}):x);renderEmpList();toast('已停用帳號','warn');}
-function enableEmp(id){if(!ROLES[S.role].canDisableEmp){toast('只有老闆可啟用','err');return;}S.employees=S.employees.map(x=>x.id===id?Object.assign({},x,{status:'active'}):x);renderEmpList();toast('已重新啟用','ok');}
+async function disableEmp(id){
+  if(!ROLES[S.role].canDisableEmp){toast('只有老闆可停用','err');return;}
+  const emp=S.employees.find(x=>x.id===id);
+  if(!confirm(`確定停用「${emp?emp.name:''}」？停用後不會出現在報表統計，歷史紀錄保留。`))return;
+  const saved=await updateEmployee(id,{status:'inactive'});
+  if(saved){ S.employees=S.employees.map(x=>x.id===id?Object.assign({},x,{status:'inactive'}):x); renderEmpList(); toast('已停用帳號','warn'); }
+  else toast('儲存失敗，請重試','err');
+}
+async function enableEmp(id){
+  if(!ROLES[S.role].canDisableEmp){toast('只有老闆可啟用','err');return;}
+  const saved=await updateEmployee(id,{status:'active'});
+  if(saved){ S.employees=S.employees.map(x=>x.id===id?Object.assign({},x,{status:'active'}):x); renderEmpList(); toast('已重新啟用','ok'); }
+  else toast('儲存失敗，請重試','err');
+}
 
 /* ════════════════════════════════════════
    薪資（員工/行政：看不到金額）
