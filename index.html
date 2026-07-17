@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-15-H ═══
-     包含: v-G 基礎 + 安全修復(LIFF錯誤不再露出老闆介面)
+<!-- ═══ NOBLE HR 版本: v2026-07-16-A ═══
+     包含: v-H 基礎 + 導覽放大/薪資限老闆會計/補卡存檔與每月一次規則
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -241,8 +241,8 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 
 /* ── NAV ────────────────────────────── */
 .bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:var(--white);border-top:1px solid var(--border);display:flex;padding-bottom:env(safe-area-inset-bottom,6px);z-index:50}
-.nav-btn{flex:1;padding:8px 0 5px;display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;cursor:pointer;font-size:9px;color:#bbb;font-weight:600;transition:color .2s}
-.nav-btn.active{color:var(--gold)}.nav-icon{font-size:18px}
+.nav-btn{flex:1;padding:9px 0 6px;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:none;cursor:pointer;font-size:11.5px;color:#bbb;font-weight:700;transition:color .2s}
+.nav-btn.active{color:var(--gold)}.nav-icon{font-size:24px}
 .page{display:none;padding-bottom:78px}.page.active{display:block}
 .pg-title{padding:12px 14px 3px;font-size:14px;font-weight:900;color:var(--ink)}
 .pg-sub{padding:0 14px 9px;font-size:10px;color:#aaa}
@@ -996,7 +996,7 @@ function setRole(r){
   } else {
     $('nav-schedule').style.display=SHOW_SCHEDULE?'flex':'none';
     $('nav-leave').style.display='flex';
-    $('nav-salary').style.display='flex';
+    $('nav-salary').style.display=role.canViewSalary?'flex':'none';
   }
   // 薪資導覽：會計/老闆顯示「薪資」，其他人顯示「出勤」
   if(role.canViewSalary){
@@ -1238,13 +1238,45 @@ function addLog(type,action,loc,time,c,sh){
 ════════════════════════════════════════ */
 function updateMkEmpSelect(){$('mkEmp').innerHTML=S.employees.filter(e=>e.status==='active').map(e=>`<option value="${e.id}">${e.name}・${e.role}</option>`).join('');}
 function updateMkShiftSelect(){$('mkShift').innerHTML=Object.values(SHIFTS).filter(s=>s.key!=='custom').map(s=>`<option value="${s.key}">${s.emoji} ${s.name}</option>`).join('');}
-function submitMakeup(){
+async function loadMakeups(){
+  try{
+    const data=await api('GET','/api/makeups');
+    if(Array.isArray(data)){
+      S.makeupRecords=data.map(m=>({id:m.id,empId:m.emp_id,date:m.date,type:m.type,time:m.time,shiftKey:m.shift_key,reason:m.reason,status:m.status||'pending',createdAt:m.created_at}));
+    }
+  }catch(e){console.error('loadMakeups 錯誤：',e);}
+}
+async function submitMakeup(){
   const date=$('mkDate').value,type=$('mkType').value,time=$('mkTime').value,reason=$('mkReason').value.trim();
   if(!date||!time){toast('請填日期和時間','err');return;}
   if(!reason){toast('請填原因','err');return;}
-  S.makeupRecords.unshift({date,type,time,reason,status:'pending',id:Date.now()});
-  $('mkDate').value=$('mkTime').value=$('mkReason').value='';
-  toast('📋 補卡申請已送出，等待審核','ok');
+  const u=S.users[S.role]; const role=ROLES[S.role];
+  // 代為補卡：行政/老闆可選對象；一般員工只能補自己
+  let targetId=u.empId, targetName=u.name;
+  if(role.canMakeup && $('mkEmp') && $('mkEmp').value){
+    targetId=$('mkEmp').value;
+    const te=S.employees.find(e=>e.id===targetId);
+    if(te) targetName=te.name;
+  }
+  // 公司規定：一般員工每月限自行申請補卡一次，超過需行政/老闆協助
+  if(!role.canMakeup){
+    const ym=(date||'').slice(0,7);
+    const used=S.makeupRecords.filter(m=>m.empId===u.empId&&(m.date||'').slice(0,7)===ym).length;
+    if(used>=1){toast('本月已申請過補卡（每月限 1 次），請聯絡行政或老闆協助','err');return;}
+  }
+  const saved=await api('POST','/api/makeups',{
+    emp_id:targetId, date, type, time,
+    shift_key:($('mkShift')?$('mkShift').value:null), reason
+  });
+  if(saved && saved.id){
+    S.makeupRecords.unshift({id:saved.id,empId:targetId,date,type,time,reason,status:'pending'});
+    $('mkDate').value=today();$('mkTime').value=$('mkReason').value='';
+    toast('📋 補卡申請已送出，等待老闆審核','ok');
+    const typeLabel=type==='in'?'上班卡':'下班卡';
+    sendLineMsg(`🕐 補卡申請通知\n\n員工：${targetName}${targetId!==u.empId?`\n代申請人：${u.name}`:''}\n日期：${date}\n類型：${typeLabel}\n時間：${time}\n原因：${reason}\n\n請至系統審核 👉\nhttps://liff.line.me/2010371976-U8wLomXx`);
+  } else {
+    toast('送出失敗，請重試','err');
+  }
 }
 
 /* ════════════════════════════════════════
@@ -2025,6 +2057,7 @@ async function initLIFF(){
   loadEmployees().then(()=>{
     initLIFF();
     loadOvertimes().then(()=>{ try{renderOvertimePage();renderLeaveGrid();}catch(e){} });
+    loadMakeups();
     loadHolidays().then(()=>{
       try{
         const h=S.holidays&&S.holidays[today()];
