@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-16-A ═══
-     包含: v-H 基礎 + 導覽放大/薪資限老闆會計/補卡存檔與每月一次規則
+<!-- ═══ NOBLE HR 版本: v2026-07-16-B ═══
+     包含: 16-A 基礎 + 代墊存檔修復/病假照片證明/請假規定顯示
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -367,7 +367,24 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 <!-- ════ PAGE: 請假 ════ -->
 <div class="page" id="page-leave">
   <div class="pg-title">申請請假 <button onclick="reloadLeaves()" style="font-size:11px;padding:4px 10px;border:none;border-radius:8px;background:var(--blue);color:white;cursor:pointer;float:right;margin-top:2px">🔄 重新載入</button></div>
+  <div style="margin:0 14px 12px;padding:13px 15px;background:var(--white);border-radius:13px;box-shadow:0 4px 20px rgba(0,0,0,.06);font-size:12px;line-height:1.9;color:#555">
+    <div style="font-weight:900;font-size:13px;color:var(--ink);margin-bottom:5px">📌 公司請假規定</div>
+    ・請假 0.5～1 天：需於<b>一星期前</b>提出申請<br>
+    ・請假 2～3 天：需於<b>二星期前</b>提出申請<br>
+    ・請假 4～10 天：需於<b>一個月前</b>提出申請<br>
+    <span style="color:#999">※ 連續天數含週末與國定假日（例：五六日一連休）<br>※ 病假等突發狀況不在此限，但需主管核准並附證明</span><br>
+    <span style="color:var(--gold);font-weight:700">★ 特休以年度內休畢為原則，未休完天數依規定折算薪資（建議休完）</span>
+  </div>
   <div class="leave-grid" id="leaveGrid"></div>
+  <div style="margin:0 14px 12px;padding:12px 14px;background:#fffbe8;border:1px solid #f0e2b0;border-radius:12px;font-size:12px;line-height:1.9;color:#7a6420">
+    <b>📌 公司請假規定</b><br>
+    ・請假 0.5～1 天：需於 1 星期前提出申請<br>
+    ・請假 2～3 天：需於 2 星期前提出申請<br>
+    ・請假 4～10 天：需於 1 個月前提出申請<br>
+    ※ 此規範含國定假日／特休／補休在內（連休以整段計算）<br>
+    ★ 特休以一年度內使用完畢為原則，未休完天數折算薪水（建議休完）<br>
+    ・臨時請假需主管特別核准
+  </div>
   <div class="banner ok" id="proofBanner" style="margin:0 14px 8px;display:none">📎 此假別需附就醫證明，核准後請盡快補交 HR。</div>
   <div class="f-grp"><label class="f-lbl">開始日期</label><input type="date" class="f-input" id="lvStart" style="margin-bottom:0"/></div>
   <div class="f-grp"><label class="f-lbl">結束日期</label><input type="date" class="f-input" id="lvEnd" style="margin-bottom:0"/></div>
@@ -383,6 +400,14 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
     <input type="number" class="f-input" id="lvCustomHours" min="0.5" max="8" step="0.5" placeholder="例：1.5" style="margin-bottom:0"/>
   </div>
   <div class="f-grp"><label class="f-lbl">事由（選填）</label><textarea class="f-textarea" id="lvReason" placeholder="例：感冒就醫、家庭事務…"></textarea></div>
+  <div class="f-grp" id="lvProofWrap" style="display:none">
+    <label class="f-lbl">證明文件照片（病假必附）<span class="f-req">*</span></label>
+    <div class="photo-upload" id="lvPhotoBox">
+      <input type="file" accept="image/*" capture="environment" onchange="handleLvPhoto(this)" id="lvPhotoInput"/>
+      <div id="lvPhotoPlaceholder">📷 點擊拍照或上傳（診斷證明／掛號收據）</div>
+      <img id="lvPhotoPreview" class="photo-preview"/>
+    </div>
+  </div>
   <div id="proofNote" style="display:none;padding:0 14px 8px"><div class="banner buf" style="margin:0">⚠️ 病假需在就診後 3 個工作天內將證明交給 HR，否則轉為事假（無薪）。</div></div>
   <div class="f-grp"><button class="btn-sub green" onclick="submitLeave()">送出申請 →</button></div>
   <div style="padding:0 14px 6px;font-size:12px;font-weight:700;color:var(--ink)">請假紀錄</div>
@@ -761,6 +786,7 @@ async function loadEmployees() {
         lineId: e.line_id || '',
         systemRole: e.system_role || 'staff',
         employeeType: e.employee_type || 'full_time',
+        remotePunch: e.remote_punch || false,
       }));
       console.log('員工資料載入成功：', S.employees.length, '人');
       renderEmpList();
@@ -785,14 +811,15 @@ async function saveCheckin(empId, type, lat, lng, officeId, shiftKey) {
 }
 
 // 請假存到 API
-async function saveLeave(empId, leaveType, startDate, endDate, reason, requireProof, dayPart, customHours) {
+async function saveLeave(empId, leaveType, startDate, endDate, reason, requireProof, dayPart, customHours, proofPhoto) {
   try{
     const data = await sbPost('leave_requests', {
       emp_id: empId, leave_type: leaveType,
       start_date: startDate, end_date: endDate,
       reason: reason || null, require_proof: requireProof || false,
       day_part: dayPart || 'full',
-      custom_hours: customHours || null
+      custom_hours: customHours || null,
+      proof_photo: proofPhoto || null
     });
     return data;
   }catch(e){
@@ -817,6 +844,7 @@ async function loadLeaves(empId) {
           start: r.start_date, end: r.end_date,
           dayPart: r.day_part || 'full',
           customHours: r.custom_hours ? Number(r.custom_hours) : null,
+          proofPhoto: r.proof_photo || null,
           reason: r.reason, status: r.status,
           requireProof: r.require_proof,
           empId: r.emp_id,
@@ -968,7 +996,7 @@ const S = {
     {id:2,empId:'E002',empName:'小涵',date:'2025-07-02',caseId:'daily',  caseName:'🏢 公司日常',cat:'shipping',catName:'📦 郵寄/快遞',desc:'寄掛號信至○○設計公司',invoice:'BL45812263',amount:570,photoUrl:'',status:'pending',createdAt:'2025-07-02'},
     {id:3,empId:'E003',empName:'阿哲',date:'2025-07-05',caseId:'graphic',caseName:'🎨 平面設計',cat:'other',   catName:'📎 其他：便利商店代收',desc:'代收設計稿輸出費用',invoice:'',amount:320,photoUrl:'',status:'pending',createdAt:'2025-07-05'},
   ],
-  expNextId:4, salaryModalEmpId:null, photoDataUrl:null,
+  expNextId:4, salaryModalEmpId:null, photoDataUrl:null, lvPhotoDataUrl:null,
   overtimes:[],
   holidays:{},
   currentExpMonth: new Date().toISOString().slice(0,7),
@@ -1115,12 +1143,19 @@ function getGPS(){
   navigator.geolocation.getCurrentPosition(pos=>{
     gpsTries=0;
     const{latitude:la,longitude:lo,accuracy:ac}=pos.coords; S.gps={la,lo,ac};
+    // 外勤員工：不限打卡地點
+    const me=S.employees.find(x=>x.id===(S.users[S.role]||{}).empId);
+    if(me&&me.remotePunch){
+      $('mapLabel').textContent='🛰️ 外勤模式';
+      $('mapCoords').textContent=`${la.toFixed(6)}, ${lo.toFixed(6)}  ±${Math.round(ac)}m`;
+      setGps('ok','外勤打卡（不限地點）','');enableBtn();return;
+    }
     const near=OFFICES.filter(o=>o.lat).map(o=>({o,d:hav(la,lo,o.lat,o.lng)})).sort((a,b)=>a.d-b.d)[0];
-    const d=near?.d??0; const inRange=near&&d<=150; const hasRemote=OFFICES.some(o=>!o.lat);
+    const d=near?.d??0; const inRange=near&&d<=200; const hasRemote=OFFICES.some(o=>!o.lat);
     $('mapLabel').textContent=near?`📍 ${near.o.name}（${d}m）`:'📍 已定位';
     $('mapCoords').textContent=`${la.toFixed(6)}, ${lo.toFixed(6)}  ±${Math.round(ac)}m`;
     if(inRange||hasRemote){setGps('ok',inRange?`已進入 ${near.o.name}`:'遠端辦公','');enableBtn();}
-    else{setGps('fail',`超出範圍 ${d-150}m`,`${d}m`);$('btnClock').disabled=true;}
+    else{setGps('fail',`超出範圍 ${d-200}m`,`${d}m`);$('btnClock').disabled=true;}
   },err=>{
     gpsTries++;
     if(err.code!==1&&gpsTries<4){
@@ -1425,6 +1460,8 @@ function submitLeave(){
     customHours=parseFloat($('lvCustomHours').value);
     if(!customHours||customHours<=0||customHours>8){toast('請填自訂時數（0.5～8 小時）','err');return;}
   }
+  // 需證明的假別（病假）必須附照片
+  if(lt.requireProof&&!S.lvPhotoDataUrl){toast('此假別需上傳證明照片（診斷證明/掛號收據）','err');return;}
   // 申請時限規則檢查（違反時警告並標注，由主管特別核准）
   let ruleFlag='';
   const todayD=new Date();todayD.setHours(0,0,0,0);
@@ -1449,13 +1486,15 @@ function submitLeave(){
     if(reqH>bal.compRemainH&&!confirm(`⚠️ 補休僅剩 ${bal.compRemainH} 小時，本次申請 ${reqH} 小時已超過額度。\n仍要送出申請嗎？`))return;
   }
   // 存到後端
-  saveLeave(u.empId, S.leaveType, start, end, reason, lt.requireProof, dayPart, customHours).then(saved => {
+  saveLeave(u.empId, S.leaveType, start, end, reason, lt.requireProof, dayPart, customHours, S.lvPhotoDataUrl).then(saved => {
     if(saved && saved.id){
       S.leaveRecords.unshift({
         id:saved.id, type:lt.key, name:lt.name, emoji:lt.emoji,
         start, end, dayPart, customHours, reason, status:'pending',
-        requireProof:lt.requireProof, empId:u.empId
+        requireProof:lt.requireProof, empId:u.empId, proofPhoto:S.lvPhotoDataUrl
       });
+      S.lvPhotoDataUrl=null;
+      try{$('lvPhotoPreview').style.display='none';$('lvPhotoPlaceholder').style.display='block';$('lvPhotoBox').classList.remove('has-photo');$('lvPhotoInput').value='';}catch(e){}
       renderLeaveRecs(); renderLeaveGrid();
     } else {
       console.error('請假儲存失敗：', saved);
@@ -1505,7 +1544,7 @@ function renderLeaveRecs(){
       <div class="lr-info">
         ${role.canViewAll?`<div style="font-size:10px;color:var(--purple);font-weight:700;margin-bottom:2px">${emp?.name||''}</div>`:''}
         <div class="lr-type">${r.name}</div>
-        <div class="lr-dates">${r.start} ～ ${r.end}${r.dayPart==='am'?'｜上半天':r.dayPart==='pm'?'｜下半天':r.dayPart==='custom'?`｜${r.customHours||''} 小時`:''}${r.reason?' ｜'+r.reason:''}</div>
+        <div class="lr-dates">${r.start} ～ ${r.end}${r.dayPart==='am'?'｜上半天':r.dayPart==='pm'?'｜下半天':r.dayPart==='custom'?`｜${r.customHours||''} 小時`:''}${r.reason?' ｜'+r.reason:''}${r.proofPhoto?` ｜<span style="color:var(--green);font-weight:900" onclick="event.stopPropagation();showProof(${typeof r.id==='string'?`'${r.id}'`:r.id})">📎 看證明</span>`:''}</div>
         ${r.requireProof&&r.status==='approved'?`<div class="lr-proof">📎 請補交就醫證明給 HR</div>`:''}
         ${actions}
       </div>
@@ -1564,18 +1603,53 @@ function toggleCatInput(){
   $('catCustomRow').style.display=isOther?'block':'none';
   if(!isOther)$('expCatName').value='';
 }
+function compressImage(dataUrl,cb){
+  const img=new Image();
+  img.onload=()=>{
+    const MAX=1000;let w=img.width,h=img.height;
+    if(w>MAX||h>MAX){const r=Math.min(MAX/w,MAX/h);w=Math.round(w*r);h=Math.round(h*r);}
+    const c=document.createElement('canvas');c.width=w;c.height=h;
+    c.getContext('2d').drawImage(img,0,0,w,h);
+    cb(c.toDataURL('image/jpeg',0.72));
+  };
+  img.onerror=()=>cb(dataUrl);
+  img.src=dataUrl;
+}
+function handleLvPhoto(input){
+  const file=input.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    compressImage(e.target.result,url=>{
+      S.lvPhotoDataUrl=url;
+      $('lvPhotoPreview').src=url;$('lvPhotoPreview').style.display='block';
+      $('lvPhotoPlaceholder').style.display='none';$('lvPhotoBox').classList.add('has-photo');
+    });
+  };
+  reader.readAsDataURL(file);
+}
+function showProof(id){
+  const r=S.leaveRecords.find(x=>x.id===id);
+  if(!r||!r.proofPhoto)return;
+  const ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:999;display:flex;align-items:center;justify-content:center;padding:18px';
+  ov.onclick=()=>ov.remove();
+  ov.innerHTML=`<img src="${r.proofPhoto}" style="max-width:100%;max-height:92%;border-radius:10px"/>`;
+  document.body.appendChild(ov);
+}
 function handlePhoto(input){
   const file=input.files[0];if(!file)return;
   const reader=new FileReader();
   reader.onload=e=>{
-    S.photoDataUrl=e.target.result;
-    $('photoPreview').src=e.target.result;$('photoPreview').style.display='block';
-    $('photoPlaceholder').style.display='none';$('photoBox').classList.add('has-photo');
-    $('photoWarn').style.display='none';
+    compressImage(e.target.result,url=>{
+      S.photoDataUrl=url;
+      $('photoPreview').src=url;$('photoPreview').style.display='block';
+      $('photoPlaceholder').style.display='none';$('photoBox').classList.add('has-photo');
+      $('photoWarn').style.display='none';
+    });
   };
   reader.readAsDataURL(file);
 }
-function submitExpense(){
+async function submitExpense(){
   const date=$('expDate').value,caseId=$('expCase').value,cat=$('expCat').value,
         amt=parseInt($('expAmt').value),desc=$('expDesc').value.trim(),invoice=$('expInvoice').value.trim();
   const customCaseName=$('expCaseName').value.trim();
@@ -1590,8 +1664,19 @@ function submitExpense(){
   const cs=CASES.find(c=>c.id===caseId);
   const caseName=caseId==='custom'?customCaseName:(cs?.name||caseId);
   const catName=cat==='other'?`📎 其他：${customCatName}`:CATS[cat]?.label||cat;
+  // 存進資料庫（含收據照片），成功才通知
+  let saved=null;
+  try{
+    saved=await sbPost('expenses',{
+      emp_id:u.empId, emp_name:u.name, date,
+      case_id:caseId, case_name:caseName, cat, cat_name:catName,
+      description:desc, invoice:invoice||null, amount:amt,
+      photo_url:S.photoDataUrl, status:'pending'
+    });
+  }catch(err){ console.error('代墊儲存失敗:',err); }
+  if(!saved||!saved.id){toast('儲存失敗，請重試','err');return;}
   S.expenses.unshift({
-    id:S.expNextId++,empId:u.empId,empName:u.name,
+    id:saved.id,empId:u.empId,empName:u.name,
     date,caseId,caseName,cat,catName,desc,invoice,
     amount:amt,photoUrl:S.photoDataUrl,status:'pending',createdAt:today()
   });
@@ -1687,7 +1772,7 @@ function renderEmpList(){
         <div class="emp-role">${e.role}</div>
         <div class="emp-hire">到職：${e.hireDate}｜${empBalStr(e)}｜${e.lineId?'🟢 LINE已綁定':'⚪ LINE未綁定'}</div>
         <div class="emp-btns">
-          ${role.canAddEmp?`<button class="emp-btn" style="background:var(--mist);color:var(--ink)" onclick="bindLineId('${e.id}')">🔗 ${e.lineId?'重新綁定':'綁定LINE'}</button>`:''}
+          ${role.canAddEmp?`<button class="emp-btn" style="background:var(--mist);color:var(--ink)" onclick="bindLineId('${e.id}')">🔗 ${e.lineId?'重新綁定':'綁定LINE'}</button><button class="emp-btn" style="background:${e.remotePunch?'var(--green-lt)':'var(--mist)'};color:var(--ink)" onclick="toggleRemote('${e.id}')">🛰️ 外勤${e.remotePunch?'：開':'：關'}</button>`:''}
           ${role.canEditSalary?`<button class="emp-btn salary" onclick="openSalaryModal('${e.id}')">💰 薪資設定</button>`:''}
           ${role.canDisableEmp&&e.status==='active'?`<button class="emp-btn disable" onclick="disableEmp('${e.id}')">停用</button>`:''}
           ${role.canDisableEmp&&e.status!=='active'?`<button class="emp-btn enable" onclick="enableEmp('${e.id}')">啟用</button>`:''}
@@ -1724,6 +1809,18 @@ function addEmployee(){
       toast('新增失敗，請再試一次','err');
     }
   });
+}
+async function toggleRemote(id){
+  if(!ROLES[S.role].canAddEmp){toast('無權限','err');return;}
+  const emp=S.employees.find(x=>x.id===id); if(!emp)return;
+  const nv=!emp.remotePunch;
+  if(nv&&!confirm(`開放「${emp.name}」外勤打卡？\n開啟後他打卡不受地點限制（適合長期外勤/外部辦公）。`))return;
+  const saved=await updateEmployee(id,{remote_punch:nv});
+  if(saved){
+    S.employees=S.employees.map(x=>x.id===id?Object.assign({},x,{remotePunch:nv}):x);
+    renderEmpList();
+    toast(nv?`🛰️ 已開放「${emp.name}」外勤打卡`:`已恢復「${emp.name}」須在公司範圍打卡`,'ok');
+  } else toast('儲存失敗，請重試','err');
 }
 async function bindLineId(id){
   if(!ROLES[S.role].canAddEmp){toast('無權限','err');return;}
