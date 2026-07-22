@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-22-A ═══
-     包含: 月報引擎 + 小涵阿哲移除 + 所有 16-x 修正
+<!-- ═══ NOBLE HR 版本: v2026-07-22-B ═══
+     包含: 22-A 基礎 + 徹底清除小涵/阿哲/行政小美/會計阿珍測試假資料
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -981,32 +981,19 @@ async function addSuspensionDay(){
 const S = {
   role:'owner',
   users:{
-    owner:     {name:'Esther',   avatar:'E', empId:'E001',hireDate:'2024-01-15'},
-    admin:     {name:'行政小美', avatar:'美',empId:'E004',hireDate:'2024-02-01'},
-    accounting:{name:'會計阿珍', avatar:'珍',empId:'E005',hireDate:'2024-03-01'},
-    staff:     {name:'小涵',     avatar:'涵',empId:'E002',hireDate:'2024-03-01'},
+    owner:     {name:'Esther',   avatar:'E', empId:'A002',hireDate:'2019-11-29'},
+    admin:     {name:'(未登入)', avatar:'?', empId:null,   hireDate:null},
+    accounting:{name:'(未登入)', avatar:'?', empId:null,   hireDate:null},
+    staff:     {name:'(未登入)', avatar:'?', empId:null,   hireDate:null},
   },
-  employees:[
-    {id:'E001',name:'Esther',   role:'設計總監',  hireDate:'2024-01-15',avatar:'E',  status:'active',baseSalary:65000, lineId:'',                                  systemRole:'老闆'},
-    {id:'E002',name:'小涵',     role:'室內設計師', hireDate:'2024-03-01',avatar:'涵', status:'active',baseSalary:42000, lineId:'',                                  systemRole:'員工'},
-    {id:'E003',name:'阿哲',     role:'平面設計師', hireDate:'2024-06-15',avatar:'哲', status:'active',baseSalary:38000, lineId:'',                                  systemRole:'員工'},
-    {id:'E004',name:'行政小美', role:'行政主管',   hireDate:'2024-02-01',avatar:'美', status:'active',baseSalary:40000, lineId:'',                                  systemRole:'行政主管'},
-    {id:'E005',name:'Joy H',    role:'會計',       hireDate:'2020-01-01',avatar:'J',  status:'active',baseSalary:0,     lineId:'U53cd2442bc28670d752733b4f0beccb6', systemRole:'會計'},
-  ],
+  employees:[],
   schedule:{}, customShiftTimes:{},
   gps:null, clockedIn:false, inTime:null, inDate:null,
   logs:[], makeupRecords:[], leaveRecords:[],
   leaveType:'annual',
   buf:{totalMins:30,usedMins:0,deductions:[]},
-  compRecords:[
-    {id:1,date:'2025-06-05',earnedMins:90,usedMins:0,expiry6m:'2025-12-05',expiry1y:'2026-06-05',note:'6/5 加班'},
-    {id:2,date:'2025-06-20',earnedMins:60,usedMins:0,expiry6m:'2025-12-20',expiry1y:'2026-06-20',note:'6/20 加班'},
-  ],
-  expenses:[
-    {id:1,empId:'E002',empName:'小涵',date:'2025-07-01',caseId:'interior',caseName:'🛋️ 室內設計',cat:'material',catName:'🧱 材料購買',desc:'採購磁磚樣品30個（富廷莊A49）',invoice:'BD41123480',amount:1768,photoUrl:'',status:'admin_ok',createdAt:'2025-07-01'},
-    {id:2,empId:'E002',empName:'小涵',date:'2025-07-02',caseId:'daily',  caseName:'🏢 公司日常',cat:'shipping',catName:'📦 郵寄/快遞',desc:'寄掛號信至○○設計公司',invoice:'BL45812263',amount:570,photoUrl:'',status:'pending',createdAt:'2025-07-02'},
-    {id:3,empId:'E003',empName:'阿哲',date:'2025-07-05',caseId:'graphic',caseName:'🎨 平面設計',cat:'other',   catName:'📎 其他：便利商店代收',desc:'代收設計稿輸出費用',invoice:'',amount:320,photoUrl:'',status:'pending',createdAt:'2025-07-05'},
-  ],
+  compRecords:[],
+  expenses:[],
   expNextId:4, salaryModalEmpId:null, photoDataUrl:null, lvPhotoDataUrl:null,
   overtimes:[],
   holidays:{},
