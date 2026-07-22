@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-22-C ═══
-     包含: 22-B 基礎 + 補上打卡資料載入(月報關鍵) + 外勤打卡地點月報
+<!-- ═══ NOBLE HR 版本: v2026-07-22-D ═══
+     包含: 22-C 基礎 + 老闆版月報加外勤地點抽查 + 顯示距公司幾公尺
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -822,8 +822,14 @@ async function loadAllCheckins(){
 }
 function officeLabel(officeId,lat,lng){
   const o = OFFICES.find(x=>x.id===officeId);
-  if(officeId==='remote' || (o && !o.lat)) return lat&&lng?`🛰️ 外勤（<a href="https://maps.google.com/?q=${lat},${lng}" target="_blank" style="color:var(--teal)">看地圖</a>）`:'🛰️ 外勤';
-  return o ? `🏢 ${o.name}` : (lat&&lng?`<a href="https://maps.google.com/?q=${lat},${lng}" target="_blank" style="color:var(--teal)">📍看地圖</a>`:'-');
+  const hq = OFFICES.find(x=>x.lat);
+  let distTxt='';
+  if(lat&&lng&&hq){
+    const d = hav(lat,lng,hq.lat,hq.lng);
+    distTxt = d>=1000 ? `（距公司 ${(d/1000).toFixed(1)}km）` : `（距公司 ${d}m）`;
+  }
+  if(officeId==='remote' || (o && !o.lat)) return lat&&lng?`🛰️ 外勤${distTxt}（<a href="https://maps.google.com/?q=${lat},${lng}" target="_blank" style="color:var(--teal)">看地圖</a>）`:'🛰️ 外勤';
+  return o ? `🏢 ${o.name}` : (lat&&lng?`<a href="https://maps.google.com/?q=${lat},${lng}" target="_blank" style="color:var(--teal)">📍看地圖</a>${distTxt}`:'-');
 }
 async function saveCheckin(empId, type, lat, lng, officeId, shiftKey) {
   try{
@@ -2007,6 +2013,19 @@ function renderAllReport(role){
   if(S.role==='owner'){
     const lateList=actEmps.map(function(e){const st=calcMonthlyStats(e.id,S_rptYear,S_rptMonth);return {e,lateDays:st.lateDays,totalLateMins:st.totalLateMins};}).filter(function(x){return x.lateDays.length>0;});
     const leaveList=actEmps.map(function(e){const leaves=S.leaveRecords.filter(function(r){return r.empId===e.id&&r.status==='approved'&&(r.start||'').startsWith(ym);});return {e,leaves};}).filter(function(x){return x.leaves.length>0;});
+    // 外勤員工打卡地點抽查
+    const remoteEmps=actEmps.filter(function(e){return e.remotePunch;});
+    const remoteHtml=remoteEmps.map(function(e){
+      const st=calcMonthlyStats(e.id,S_rptYear,S_rptMonth);
+      const dayLocs=Object.entries(st.locations).sort(function(a,b){return a[0].localeCompare(b[0]);});
+      if(!dayLocs.length) return '';
+      return '<div style="margin-bottom:10px"><div style="font-weight:900;font-size:13px;margin-bottom:4px">'+e.name+'</div>'+
+        dayLocs.map(function(entry){
+          const d=entry[0]; const pts=entry[1];
+          const pin=pts.map(function(p){return (p.type==='in'?'上':'下')+' '+p.time+' '+officeLabel(p.officeId,p.lat,p.lng);}).join('　');
+          return '<div style="font-size:12px;color:#666;padding:2px 0">'+d.slice(5)+'：'+pin+'</div>';
+        }).join('')+'</div>';
+    }).join('');
     $('salContent').innerHTML=
       '<div class="section"><div class="sec-head">🔴 本月有遲到的員工</div><div style="padding:6px 14px">'+
       (lateList.length?lateList.map(function(x){return '<div class="comp-item"><div><div style="font-weight:700">'+x.e.name+'</div><div style="font-size:11px;color:#999">遲到 '+x.lateDays.length+' 次・共 '+x.totalLateMins+' 分鐘</div></div><div style="font-size:12px;font-weight:900;color:var(--red)">非全勤</div></div>';}).join(''):
@@ -2014,7 +2033,8 @@ function renderAllReport(role){
       '<div class="section"><div class="sec-head">📋 本月請假紀錄</div><div style="padding:6px 14px">'+
       (leaveList.length?leaveList.map(function(x){return '<div style="margin-bottom:10px"><div style="font-weight:900;font-size:13px;margin-bottom:4px">'+x.e.name+'</div>'+
       x.leaves.map(function(r){const p=r.dayPart==='am'?'上半天':r.dayPart==='pm'?'下半天':r.dayPart==='custom'?r.customHours+'小時':'';return '<div style="font-size:12px;color:#666;padding:2px 0">'+r.emoji+' '+r.name+'・'+r.start+(r.start!==r.end?' ～ '+r.end:'')+' '+p+'</div>';}).join('')+'</div>';}).join(''):
-      '<div style="color:#bbb;font-size:13px">本月尚無請假紀錄</div>')+'</div></div>';
+      '<div style="color:#bbb;font-size:13px">本月尚無請假紀錄</div>')+'</div></div>'+
+      (remoteHtml?'<div class="section"><div class="sec-head">📍 外勤打卡地點抽查</div><div style="padding:6px 14px">'+remoteHtml+'</div></div>':'');
     return;
   }
   const rows=actEmps.map(function(e){const st=calcMonthlyStats(e.id,S_rptYear,S_rptMonth);const isPartTime=e.role==='工讀生';const totalH=(st.totalWorkMins/60).toFixed(1);return {e,st,isPartTime,totalH};});
