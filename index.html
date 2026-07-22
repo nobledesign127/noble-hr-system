@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-16-B ═══
-     包含: 16-A 基礎 + 代墊存檔修復/病假照片證明/請假規定顯示
+<!-- ═══ NOBLE HR 版本: v2026-07-22-A ═══
+     包含: 月報引擎 + 小涵阿哲移除 + 所有 16-x 修正
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -569,6 +569,17 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
     <div class="sal-name" id="salName">Esther</div>
     <div class="sal-role" id="salRole">設計總監</div>
     <div class="sal-grid" id="salGrid"></div>
+  </div>
+  <!-- 月報分頁切換 -->
+  <div style="display:flex;gap:0;margin:0 14px 12px;border-radius:12px;overflow:hidden;border:1.5px solid var(--gold)">
+    <button id="rptTab1" onclick="switchRptTab(1)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:var(--gold);color:#1a1808;cursor:pointer">📊 我的月報</button>
+    <button id="rptTab2" onclick="switchRptTab(2)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer" id="rptTab2">👥 全員月報</button>
+  </div>
+  <!-- 月份選擇 -->
+  <div style="display:flex;align-items:center;gap:8px;margin:0 14px 14px">
+    <button onclick="changeRptMonth(-1)" style="border:none;background:var(--mist);border-radius:8px;padding:6px 14px;font-size:18px;cursor:pointer">‹</button>
+    <div id="rptMonthLabel" style="flex:1;text-align:center;font-size:15px;font-weight:900;color:var(--ink)"></div>
+    <button onclick="changeRptMonth(1)" style="border:none;background:var(--mist);border-radius:8px;padding:6px 14px;font-size:18px;cursor:pointer">›</button>
   </div>
   <div id="salContent"></div>
 </div>
@@ -1856,45 +1867,167 @@ async function enableEmp(id){
 /* ════════════════════════════════════════
    薪資（員工/行政：看不到金額）
 ════════════════════════════════════════ */
+/* ════════════════════════════════════════
+   月報引擎
+════════════════════════════════════════ */
+let S_rptMonth = new Date().getMonth();
+let S_rptYear  = new Date().getFullYear();
+let S_rptTab   = 1;
+
+function changeRptMonth(dir){
+  S_rptMonth += dir;
+  if(S_rptMonth > 11){ S_rptMonth = 0; S_rptYear++; }
+  if(S_rptMonth < 0) { S_rptMonth = 11; S_rptYear--; }
+  renderSalaryPage();
+}
+function switchRptTab(n){
+  S_rptTab = n;
+  $('rptTab1').style.background = n===1 ? 'var(--gold)' : 'none';
+  $('rptTab1').style.color      = n===1 ? '#1a1808'     : 'var(--gold)';
+  $('rptTab2').style.background = n===2 ? 'var(--gold)' : 'none';
+  $('rptTab2').style.color      = n===2 ? '#1a1808'     : 'var(--gold)';
+  renderSalaryPage();
+}
+
+function toPlusTaipei(ts){ return new Date(new Date(ts).getTime()+8*3600000); }
+function tDateStr(ts){ const d=toPlusTaipei(ts); return d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0'); }
+function tTimeStr(ts){ const d=toPlusTaipei(ts); return String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0'); }
+
+function calcMonthlyStats(empId, year, month){
+  const ym = year+'-'+String(month+1).padStart(2,'0');
+  const logs = (S.allCheckins||S.logs||[]).filter(l=>{
+    const eId = l.empId||l.emp_id;
+    const ts  = l.checked_at||l.time;
+    return eId===empId && tDateStr(ts).startsWith(ym);
+  });
+  const days = {};
+  logs.forEach(l=>{
+    const ts=l.checked_at||l.time;
+    const d=tDateStr(ts); const t=tTimeStr(ts);
+    if(!days[d]) days[d]={in:null,out:null};
+    if(l.type==='in'  && (!days[d].in  || t<days[d].in))  days[d].in=t;
+    if(l.type==='out' && (!days[d].out || t>days[d].out)) days[d].out=t;
+  });
+  const GRACE='09:30'; let totalLateMins=0; const lateDays=[];
+  Object.entries(days).forEach(function(entry){
+    const d=entry[0]; const v=entry[1];
+    if(!v.in) return;
+    if(v.in>GRACE){
+      const gh=9,gm=30,pts=v.in.split(':').map(Number);
+      const late=(pts[0]*60+pts[1])-(gh*60+gm);
+      totalLateMins+=late; lateDays.push({date:d,in:v.in,late});
+    }
+  });
+  const overMins=Math.max(0,totalLateMins-30); const penalty=overMins*3;
+  let totalWorkMins=0;
+  Object.values(days).forEach(function(v){
+    if(v.in&&v.out){
+      const ip=v.in.split(':').map(Number); const op=v.out.split(':').map(Number);
+      totalWorkMins+=(op[0]*60+op[1])-(ip[0]*60+ip[1]);
+    }
+  });
+  const leaves=S.leaveRecords.filter(r=>r.empId===empId&&r.status==='approved'&&(r.start||'').startsWith(ym));
+  const expAmt=S.expenses.filter(e=>e.empId===empId&&(e.date||'').startsWith(ym)&&['approved','paid'].includes(e.status)).reduce(function(s,e){return s+e.amount;},0);
+  return {days,lateDays,totalLateMins,overMins,penalty,totalWorkMins,leaves,expAmt};
+}
+
 function renderSalaryPage(){
-  const role=ROLES[S.role];const u=S.users[S.role];
+  const role=ROLES[S.role]; const u=S.users[S.role];
   const myEmp=S.employees.find(e=>e.id===u.empId)||S.employees[0];
-  $('salAv').textContent=myEmp.avatar;$('salAv').style.background=EMP_COLORS[0];
-  $('salName').textContent=myEmp.name;$('salRole').textContent=myEmp.role;
-  const fmt=n=>'NT$'+n.toLocaleString();
+  $('salAv').textContent=myEmp.avatar; $('salAv').style.background='var(--gold)';
+  $('salName').textContent=myEmp.name; $('salRole').textContent=myEmp.role;
+  $('salGrid').innerHTML='';
+  const mLabel=S_rptYear+' 年 '+(S_rptMonth+1)+' 月';
+  if($('rptMonthLabel')) $('rptMonthLabel').textContent=mLabel;
+  const showFull=role.canViewAll;
+  if($('rptTab2')) $('rptTab2').style.display=showFull?'block':'none';
+  if(!showFull) S_rptTab=1;
+  if(S_rptTab===1) renderMyReport(myEmp,role,u);
+  else renderAllReport(role);
+}
+
+function renderMyReport(myEmp,role,u){
+  const fmt=function(n){return 'NT$'+n.toLocaleString();};
+  const st=calcMonthlyStats(u.empId,S_rptYear,S_rptMonth);
   if(role.canViewSalary){
     const base=myEmp.baseSalary||0;
-    const latePenalty=S.buf.deductions.reduce((s,r)=>s+r.penalty,0);
-    const pDays=S.leaveRecords.filter(r=>r.type==='personal'&&r.status==='approved'&&r.empId===u.empId).length;
-    const labor=Math.round(base*.09);const health=Math.round(base*.0517*.3);
-    const pDeduct=Math.round((base/30)*pDays);
-    const net=base-latePenalty-pDeduct-labor-health;
-    $('salGrid').innerHTML=`
-      <div class="sal-item"><div class="sal-lbl">底薪</div><div class="sal-val">${base?fmt(base):'未設定'}</div></div>
-      <div class="sal-item"><div class="sal-lbl">實領（薪資）</div><div class="sal-val">${base?fmt(net):'--'}</div></div>
-      <div class="sal-item"><div class="sal-lbl">遲到扣款</div><div class="sal-val neg">${latePenalty>0?'-'+fmt(latePenalty):'NT$0'}</div></div>
-      <div class="sal-item"><div class="sal-lbl">勞健保</div><div class="sal-val neg">${base?'-'+fmt(labor+health):'--'}</div></div>`;
-    const expTotal=S.expenses.filter(e=>e.empId===u.empId&&['approved','paid'].includes(e.status)).reduce((s,e)=>s+e.amount,0);
-    $('salContent').innerHTML=`
-      ${expTotal>0?`<div class="section"><div class="sec-head">💳 代墊款退款（另一筆匯款）</div><div style="padding:12px 14px"><div class="comp-item"><span>本月代墊款合計</span><span style="font-weight:900;color:var(--teal)">${fmt(expTotal)}</span></div><div style="font-size:10px;color:#aaa;margin-top:4px">⚡ 與薪資分開匯款，月底另行撥付</div></div></div>`:''}
-      <div class="section"><div class="sec-head">👥 全員薪資概覽</div><div style="padding:10px 14px">${S.employees.filter(e=>e.status==='active').map((e,i)=>{const b=e.baseSalary||0;const lb=Math.round(b*.09);const hb=Math.round(b*.0517*.3);const n2=b-lb-hb;return `<div class="comp-item"><div><div style="font-weight:700">${e.name}</div><div style="font-size:10px;color:#aaa">${e.role}</div></div><div style="text-align:right"><div style="font-weight:900;color:var(--gold)">${b?fmt(b):"<span style='color:#ccc'>未設定</span>"}</div>${b?`<div style="font-size:10px;color:#aaa">實領 ${fmt(n2)}</div>`:''}${role.canEditSalary?`<button style="font-size:9px;padding:2px 6px;border:none;border-radius:5px;background:var(--gold-lt);color:var(--orange);cursor:pointer;margin-top:2px" onclick="openSalaryModal('${e.id}')">設定</button>`:''}</div></div>`;}).join('')}</div></div>
-      <div class="section"><div class="sec-head">🌿 假期餘額</div><div style="padding:10px 14px">${LEAVE_TYPES.map(lt=>{const annual=calcAnnualLeave(myEmp.hireDate);let bal=lt.key==='annual'?annual:lt.monthlyCap?`${lt.monthlyCap}/月`:(lt.yearLimit??'-')+'天';return `<div class="comp-item"><div>${lt.emoji} ${lt.name} <span style="font-size:9px;color:#aaa">${lt.note}</span></div><div style="font-weight:900;color:var(--green)">${bal}</div></div>`;}).join('')}</div></div>`;
+    $('salGrid').innerHTML='<div class="sal-item"><div class="sal-lbl">底薪</div><div class="sal-val">'+(base?fmt(base):'未設定')+'</div></div>'+
+      '<div class="sal-item"><div class="sal-lbl">遲到扣款</div><div class="sal-val neg">'+(st.penalty>0?'-'+fmt(st.penalty):'NT$0')+'</div></div>'+
+      '<div class="sal-item"><div class="sal-lbl">代墊退款</div><div class="sal-val ok">'+(st.expAmt>0?'+'+fmt(st.expAmt):'NT$0')+'</div></div>'+
+      '<div class="sal-item"><div class="sal-lbl">遲到總分</div><div class="sal-val '+(st.totalLateMins>30?'bad':'ok')+'">'+st.totalLateMins+' 分</div></div>';
   } else {
-    // 員工/行政：只顯示出勤摘要，完全不顯示任何薪資金額
-    $('salGrid').innerHTML=`
-      <div class="sal-item"><div class="sal-lbl">本月出勤</div><div class="sal-val ok">${S.logs.filter(l=>l.type==='in').length} 天</div></div>
-      <div class="sal-item"><div class="sal-lbl">特休剩餘</div><div class="sal-val ok">${calcAnnualLeave(myEmp.hireDate)} 天</div></div>
-      <div class="sal-item"><div class="sal-lbl">遲到次數</div><div class="sal-val ${S.buf.deductions.length>0?'warn':'ok'}">${S.buf.deductions.length} 次</div></div>
-      <div class="sal-item"><div class="sal-lbl">超出緩衝</div><div class="sal-val ${S.buf.deductions.reduce((s,r)=>s+r.overMins,0)>0?'bad':'ok'}">${S.buf.deductions.reduce((s,r)=>s+r.overMins,0)} 分</div></div>`;
-    $('salContent').innerHTML=`
-      <div class="section"><div class="sec-head">🌿 假期餘額</div><div style="padding:10px 14px">${LEAVE_TYPES.map(lt=>{const annual=calcAnnualLeave(myEmp.hireDate);let bal=lt.key==='annual'?annual:lt.monthlyCap?`${lt.monthlyCap}/月`:(lt.yearLimit??'-')+'天';return `<div class="comp-item"><div>${lt.emoji} ${lt.name}</div><div style="font-weight:900;color:var(--green)">${bal}</div></div>`;}).join('')}</div></div>
-      <div class="section"><div class="sec-head">⏱️ 本月出勤摘要</div><div style="padding:10px 14px">
-        <div class="comp-item"><span>月緩衝剩餘</span><span style="color:var(--green);font-weight:700">${S.buf.totalMins-S.buf.usedMins} 分</span></div>
-        <div class="comp-item"><span>已使用緩衝</span><span style="color:var(--orange);font-weight:700">${S.buf.usedMins} 分</span></div>
-        ${S.buf.deductions.length>0?`<div class="comp-item"><span>遲到紀錄</span><span style="color:var(--red);font-weight:700">${S.buf.deductions.length} 次</span></div>`:''}
-      </div></div>`;
+    $('salGrid').innerHTML='<div class="sal-item"><div class="sal-lbl">出勤天數</div><div class="sal-val ok">'+Object.keys(st.days).length+' 天</div></div>'+
+      '<div class="sal-item"><div class="sal-lbl">遲到次數</div><div class="sal-val '+(st.lateDays.length>0?'warn':'ok')+'">'+st.lateDays.length+' 次</div></div>'+
+      '<div class="sal-item"><div class="sal-lbl">遲到總分</div><div class="sal-val '+(st.totalLateMins>30?'bad':'ok')+'">'+st.totalLateMins+' 分</div></div>'+
+      '<div class="sal-item"><div class="sal-lbl">緩衝剩餘</div><div class="sal-val ok">'+Math.max(0,30-st.totalLateMins)+' 分</div></div>';
   }
+  const dayEntries=Object.entries(st.days).sort(function(a,b){return a[0].localeCompare(b[0]);});
+  const DAYS=['日','一','二','三','四','五','六'];
+  const detail=dayEntries.map(function(entry){
+    const d=entry[0]; const v=entry[1];
+    const late=st.lateDays.find(function(l){return l.date===d;});
+    const lv=st.leaves.filter(function(r){return r.start<=d&&r.end>=d;});
+    return '<div class="comp-item" style="align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--rule)">'+
+      '<div><div style="font-weight:700;font-size:13px">'+d.slice(5)+' '+DAYS[new Date(d).getDay()]+'</div>'+
+      '<div style="font-size:11px;color:#999">'+(v.in||'--:--')+' → '+(v.out||'--:--')+
+      lv.map(function(r){return '<span style="background:#e8f5e9;color:var(--green);border-radius:4px;padding:1px 5px;margin-left:4px">'+r.emoji+r.name+'</span>';}).join('')+
+      '</div></div>'+
+      '<div style="font-size:12px;font-weight:900;color:'+(late?'var(--red)':'var(--green)')+'">'+
+      (late?'⚠️ +'+late.late+'分':v.in?'✅ 準時':'--')+'</div></div>';
+  }).join('');
+  const lvHtml=st.leaves.length?st.leaves.map(function(r){
+    const partTxt=r.dayPart==='am'?'上半天':r.dayPart==='pm'?'下半天':r.dayPart==='custom'?r.customHours+'小時':'';
+    return '<div class="comp-item"><div>'+r.emoji+' '+r.name+'<div style="font-size:11px;color:#999">'+r.start+(r.start!==r.end?' ～ '+r.end:'')+' '+partTxt+'</div></div><div style="font-size:11px;font-weight:700;color:var(--green)">已核准</div></div>';
+  }).join(''):'<div style="color:#bbb;font-size:13px">本月尚無請假紀錄</div>';
+  const ym=S_rptYear+'-'+String(S_rptMonth+1).padStart(2,'0');
+  const myExps=role.canViewSalary?S.expenses.filter(function(e){return e.empId===u.empId&&(e.date||'').startsWith(ym)&&['approved','paid'].includes(e.status);}):[];
+  $('salContent').innerHTML=
+    '<div class="section"><div class="sec-head">📅 '+(S_rptMonth+1)+' 月打卡明細</div><div style="padding:6px 14px">'+
+    (detail||'<div style="color:#bbb;font-size:13px;padding:8px 0">本月尚無打卡紀錄</div>')+'</div></div>'+
+    '<div class="section"><div class="sec-head">🌿 本月請假</div><div style="padding:6px 14px">'+lvHtml+'</div></div>'+
+    (myExps.length?'<div class="section"><div class="sec-head">💳 代墊款（本月已核准）</div><div style="padding:6px 14px">'+
+    myExps.map(function(e){return '<div class="comp-item"><div><div style="font-weight:700">'+e.catName+'</div><div style="font-size:11px;color:#999">'+e.date+'・'+e.caseName+'</div></div><div style="font-weight:900;color:var(--teal)">NT$'+e.amount.toLocaleString()+'</div></div>';}).join('')+
+    '<div class="comp-item" style="border-top:1.5px solid var(--gold);margin-top:6px;padding-top:6px"><span style="font-weight:900">合計</span><span style="font-weight:900;color:var(--teal)">'+fmt(st.expAmt)+'</span></div></div></div>':'');
 }
+
+function renderAllReport(role){
+  const fmt=function(n){return 'NT$'+n.toLocaleString();};
+  const ym=S_rptYear+'-'+String(S_rptMonth+1).padStart(2,'0');
+  const actEmps=S.employees.filter(function(e){return e.status==='active';});
+  if(S.role==='owner'){
+    const lateList=actEmps.map(function(e){const st=calcMonthlyStats(e.id,S_rptYear,S_rptMonth);return {e,lateDays:st.lateDays,totalLateMins:st.totalLateMins};}).filter(function(x){return x.lateDays.length>0;});
+    const leaveList=actEmps.map(function(e){const leaves=S.leaveRecords.filter(function(r){return r.empId===e.id&&r.status==='approved'&&(r.start||'').startsWith(ym);});return {e,leaves};}).filter(function(x){return x.leaves.length>0;});
+    $('salContent').innerHTML=
+      '<div class="section"><div class="sec-head">🔴 本月有遲到的員工</div><div style="padding:6px 14px">'+
+      (lateList.length?lateList.map(function(x){return '<div class="comp-item"><div><div style="font-weight:700">'+x.e.name+'</div><div style="font-size:11px;color:#999">遲到 '+x.lateDays.length+' 次・共 '+x.totalLateMins+' 分鐘</div></div><div style="font-size:12px;font-weight:900;color:var(--red)">非全勤</div></div>';}).join(''):
+      '<div style="color:var(--green);font-weight:700;padding:6px 0">🎉 本月全員準時！</div>')+'</div></div>'+
+      '<div class="section"><div class="sec-head">📋 本月請假紀錄</div><div style="padding:6px 14px">'+
+      (leaveList.length?leaveList.map(function(x){return '<div style="margin-bottom:10px"><div style="font-weight:900;font-size:13px;margin-bottom:4px">'+x.e.name+'</div>'+
+      x.leaves.map(function(r){const p=r.dayPart==='am'?'上半天':r.dayPart==='pm'?'下半天':r.dayPart==='custom'?r.customHours+'小時':'';return '<div style="font-size:12px;color:#666;padding:2px 0">'+r.emoji+' '+r.name+'・'+r.start+(r.start!==r.end?' ～ '+r.end:'')+' '+p+'</div>';}).join('')+'</div>';}).join(''):
+      '<div style="color:#bbb;font-size:13px">本月尚無請假紀錄</div>')+'</div></div>';
+    return;
+  }
+  const rows=actEmps.map(function(e){const st=calcMonthlyStats(e.id,S_rptYear,S_rptMonth);const isPartTime=e.role==='工讀生';const totalH=(st.totalWorkMins/60).toFixed(1);return {e,st,isPartTime,totalH};});
+  const tableRows=rows.map(function(r){
+    return '<tr style="border-bottom:1px solid var(--rule)">'+
+      '<td style="padding:8px 4px;font-weight:700;min-width:60px">'+r.e.name+'</td>'+
+      '<td style="padding:8px 4px;text-align:center;color:'+(r.st.totalLateMins>0?'var(--red)':'var(--green)')+';font-weight:700">'+(r.st.totalLateMins>0?r.st.totalLateMins+'分':'-')+'</td>'+
+      '<td style="padding:8px 4px;text-align:center;font-weight:700;color:'+(r.st.penalty>0?'var(--red)':'#aaa')+'">'+(r.st.penalty>0?'-'+fmt(r.st.penalty):'-')+'</td>'+
+      '<td style="padding:8px 4px;text-align:center">'+(r.isPartTime?r.totalH+'h':Object.keys(r.st.days).length+'天')+'</td>'+
+      '<td style="padding:8px 4px;text-align:center;color:var(--teal);font-weight:700">'+(r.st.expAmt>0?fmt(r.st.expAmt):'-')+'</td>'+
+      '<td style="padding:8px 4px;text-align:center;font-size:11px;color:#666">'+(r.st.leaves.map(function(l){return l.emoji+l.name.slice(0,1);}).join(' ')||'-')+'</td></tr>';
+  }).join('');
+  const expRows=rows.filter(function(r){return r.st.expAmt>0;}).map(function(r){return '<div class="comp-item"><span style="font-weight:700">'+r.e.name+'</span><span style="font-weight:900;color:var(--teal)">'+fmt(r.st.expAmt)+'</span></div>';}).join('');
+  const expTotal=rows.reduce(function(s,r){return s+r.st.expAmt;},0);
+  $('salContent').innerHTML=
+    '<div class="section"><div class="sec-head">📊 '+(S_rptMonth+1)+' 月全員出勤統計</div>'+
+    '<div style="overflow-x:auto;padding:4px 14px"><table style="width:100%;border-collapse:collapse;font-size:12px">'+
+    '<tr style="color:#aaa;font-size:11px;border-bottom:2px solid var(--gold)"><th style="padding:6px 4px;text-align:left">員工</th><th style="padding:6px 4px">遲到</th><th style="padding:6px 4px">扣薪</th><th style="padding:6px 4px">出勤</th><th style="padding:6px 4px">代墊</th><th style="padding:6px 4px">假別</th></tr>'+
+    tableRows+'</table></div></div>'+
+    (expTotal>0?'<div class="section"><div class="sec-head">💳 本月代墊彙整</div><div style="padding:6px 14px">'+expRows+
+    '<div class="comp-item" style="border-top:1.5px solid var(--gold);margin-top:6px;padding-top:6px"><span style="font-weight:900">本月代墊總計</span><span style="font-weight:900;color:var(--teal)">'+fmt(expTotal)+'</span></div></div></div>':'');
+}
+
 function openSalaryModal(empId){
   if(!ROLES[S.role].canEditSalary){toast('無權限','err');return;}
   const emp=S.employees.find(e=>e.id===empId);
