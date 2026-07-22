@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-22-B ═══
-     包含: 22-A 基礎 + 徹底清除小涵/阿哲/行政小美/會計阿珍測試假資料
+<!-- ═══ NOBLE HR 版本: v2026-07-22-C ═══
+     包含: 22-B 基礎 + 補上打卡資料載入(月報關鍵) + 外勤打卡地點月報
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -809,6 +809,22 @@ async function loadEmployees() {
 }
 
 // 打卡存到 API
+async function loadAllCheckins(){
+  try{
+    const data = await sbGet('checkins', {'order':'checked_at.desc','limit':'3000'});
+    if(data && Array.isArray(data)){
+      S.allCheckins = data.map(c=>({
+        empId:c.emp_id, type:c.type, checked_at:c.checked_at,
+        lat:c.lat, lng:c.lng, officeId:c.office_id
+      }));
+    }
+  }catch(e){ console.error('loadAllCheckins 錯誤：', e); }
+}
+function officeLabel(officeId,lat,lng){
+  const o = OFFICES.find(x=>x.id===officeId);
+  if(officeId==='remote' || (o && !o.lat)) return lat&&lng?`🛰️ 外勤（<a href="https://maps.google.com/?q=${lat},${lng}" target="_blank" style="color:var(--teal)">看地圖</a>）`:'🛰️ 外勤';
+  return o ? `🏢 ${o.name}` : (lat&&lng?`<a href="https://maps.google.com/?q=${lat},${lng}" target="_blank" style="color:var(--teal)">📍看地圖</a>`:'-');
+}
 async function saveCheckin(empId, type, lat, lng, officeId, shiftKey) {
   try{
     return await sbPost('checkins', {
@@ -1915,7 +1931,14 @@ function calcMonthlyStats(empId, year, month){
   });
   const leaves=S.leaveRecords.filter(r=>r.empId===empId&&r.status==='approved'&&(r.start||'').startsWith(ym));
   const expAmt=S.expenses.filter(e=>e.empId===empId&&(e.date||'').startsWith(ym)&&['approved','paid'].includes(e.status)).reduce(function(s,e){return s+e.amount;},0);
-  return {days,lateDays,totalLateMins,overMins,penalty,totalWorkMins,leaves,expAmt};
+  // 每天打卡地點（供外勤月報使用）
+  const locations={};
+  logs.forEach(function(l){
+    const ts=l.checked_at; const d=tDateStr(ts); const t=tTimeStr(ts);
+    if(!locations[d]) locations[d]=[];
+    locations[d].push({type:l.type,time:t,lat:l.lat,lng:l.lng,officeId:l.officeId});
+  });
+  return {days,lateDays,totalLateMins,overMins,penalty,totalWorkMins,leaves,expAmt,locations};
 }
 
 function renderSalaryPage(){
@@ -1997,7 +2020,7 @@ function renderAllReport(role){
   const rows=actEmps.map(function(e){const st=calcMonthlyStats(e.id,S_rptYear,S_rptMonth);const isPartTime=e.role==='工讀生';const totalH=(st.totalWorkMins/60).toFixed(1);return {e,st,isPartTime,totalH};});
   const tableRows=rows.map(function(r){
     return '<tr style="border-bottom:1px solid var(--rule)">'+
-      '<td style="padding:8px 4px;font-weight:700;min-width:60px">'+r.e.name+'</td>'+
+      '<td style="padding:8px 4px;font-weight:700;min-width:60px">'+r.e.name+(r.e.remotePunch?' 🛰️':'')+'</td>'+
       '<td style="padding:8px 4px;text-align:center;color:'+(r.st.totalLateMins>0?'var(--red)':'var(--green)')+';font-weight:700">'+(r.st.totalLateMins>0?r.st.totalLateMins+'分':'-')+'</td>'+
       '<td style="padding:8px 4px;text-align:center;font-weight:700;color:'+(r.st.penalty>0?'var(--red)':'#aaa')+'">'+(r.st.penalty>0?'-'+fmt(r.st.penalty):'-')+'</td>'+
       '<td style="padding:8px 4px;text-align:center">'+(r.isPartTime?r.totalH+'h':Object.keys(r.st.days).length+'天')+'</td>'+
@@ -2006,13 +2029,26 @@ function renderAllReport(role){
   }).join('');
   const expRows=rows.filter(function(r){return r.st.expAmt>0;}).map(function(r){return '<div class="comp-item"><span style="font-weight:700">'+r.e.name+'</span><span style="font-weight:900;color:var(--teal)">'+fmt(r.st.expAmt)+'</span></div>';}).join('');
   const expTotal=rows.reduce(function(s,r){return s+r.st.expAmt;},0);
+  // 外勤員工打卡地點明細
+  const remoteRows=rows.filter(function(r){return r.e.remotePunch;});
+  const locHtml=remoteRows.map(function(r){
+    const dayLocs=Object.entries(r.st.locations).sort(function(a,b){return a[0].localeCompare(b[0]);});
+    if(!dayLocs.length) return '';
+    return '<div style="margin-bottom:12px"><div style="font-weight:900;font-size:13px;margin-bottom:4px">🛰️ '+r.e.name+'</div>'+
+      dayLocs.map(function(entry){
+        const d=entry[0]; const pts=entry[1];
+        const pin=pts.map(function(p){return (p.type==='in'?'上':'下')+' '+p.time+' '+officeLabel(p.officeId,p.lat,p.lng);}).join('　');
+        return '<div style="font-size:12px;color:#666;padding:2px 0">'+d.slice(5)+'：'+pin+'</div>';
+      }).join('')+'</div>';
+  }).join('');
   $('salContent').innerHTML=
     '<div class="section"><div class="sec-head">📊 '+(S_rptMonth+1)+' 月全員出勤統計</div>'+
     '<div style="overflow-x:auto;padding:4px 14px"><table style="width:100%;border-collapse:collapse;font-size:12px">'+
     '<tr style="color:#aaa;font-size:11px;border-bottom:2px solid var(--gold)"><th style="padding:6px 4px;text-align:left">員工</th><th style="padding:6px 4px">遲到</th><th style="padding:6px 4px">扣薪</th><th style="padding:6px 4px">出勤</th><th style="padding:6px 4px">代墊</th><th style="padding:6px 4px">假別</th></tr>'+
     tableRows+'</table></div></div>'+
     (expTotal>0?'<div class="section"><div class="sec-head">💳 本月代墊彙整</div><div style="padding:6px 14px">'+expRows+
-    '<div class="comp-item" style="border-top:1.5px solid var(--gold);margin-top:6px;padding-top:6px"><span style="font-weight:900">本月代墊總計</span><span style="font-weight:900;color:var(--teal)">'+fmt(expTotal)+'</span></div></div></div>':'');
+    '<div class="comp-item" style="border-top:1.5px solid var(--gold);margin-top:6px;padding-top:6px"><span style="font-weight:900">本月代墊總計</span><span style="font-weight:900;color:var(--teal)">'+fmt(expTotal)+'</span></div></div></div>':'')+
+    (locHtml?'<div class="section"><div class="sec-head">📍 外勤打卡地點明細</div><div style="padding:6px 14px">'+locHtml+'</div></div>':'');
 }
 
 function openSalaryModal(empId){
@@ -2275,6 +2311,7 @@ async function initLIFF(){
     initLIFF();
     loadOvertimes().then(()=>{ try{renderOvertimePage();renderLeaveGrid();}catch(e){} });
     loadMakeups();
+    loadAllCheckins();
     loadHolidays().then(()=>{
       try{
         const h=S.holidays&&S.holidays[today()];
