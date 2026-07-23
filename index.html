@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-22-D ═══
-     包含: 22-C 基礎 + 老闆版月報加外勤地點抽查 + 顯示距公司幾公尺
+<!-- ═══ NOBLE HR 版本: v2026-07-22-F ═══
+     包含: 22-E 基礎 + 禁止自核代墊(老闆除外)
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -563,6 +563,21 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 </div>
 
 <!-- ════ PAGE: 薪資 ════ -->
+<div class="page" id="page-checkin">
+  <div class="pg-title">出勤紀錄</div>
+  <div class="pg-sub">遲到與請假總覽（老闆／會計／行政主管）</div>
+  <div style="display:flex;gap:0;margin:0 14px 12px;border-radius:12px;overflow:hidden;border:1.5px solid var(--gold)">
+    <button id="ckTab1" onclick="switchCkTab(1)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:var(--gold);color:#1a1808;cursor:pointer">🔴 遲到總覽</button>
+    <button id="ckTab2" onclick="switchCkTab(2)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">📋 請假總覽</button>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;margin:0 14px 14px">
+    <button onclick="changeCkMonth(-1)" style="border:none;background:var(--mist);border-radius:8px;padding:6px 14px;font-size:18px;cursor:pointer">‹</button>
+    <div id="ckMonthLabel" style="flex:1;text-align:center;font-size:15px;font-weight:900;color:var(--ink)"></div>
+    <button onclick="changeCkMonth(1)" style="border:none;background:var(--mist);border-radius:8px;padding:6px 14px;font-size:18px;cursor:pointer">›</button>
+  </div>
+  <div id="ckContent"></div>
+</div>
+
 <div class="page" id="page-salary">
   <div class="sal-hero">
     <div class="sal-av" id="salAv" style="background:var(--gold);color:var(--dark)">E</div>
@@ -591,6 +606,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
   <button class="nav-btn"        id="nav-leave"     onclick="switchPage('leave')">    <span class="nav-icon">🌿</span>請假</button>
   <button class="nav-btn"        id="nav-expense"  onclick="switchPage('expense')"><span class="nav-icon">💳</span>代墊</button>
   <button class="nav-btn"        id="nav-overtime" onclick="switchPage('overtime')"><span class="nav-icon">⏰</span>加班</button>
+  <button class="nav-btn"        id="nav-checkin"  onclick="switchPage('checkin')" style="display:none"><span class="nav-icon">🕐</span>出勤</button>
   <button class="nav-btn"        id="nav-employees" onclick="switchPage('employees')" style="display:none"><span class="nav-icon">👥</span>員工</button>
   <button class="nav-btn"        id="nav-salary"    onclick="switchPage('salary')">   <span class="nav-icon" id="salNavIcon">📊</span><span id="salNavLabel">出勤</span></button>
 </nav>
@@ -1034,6 +1050,7 @@ function setRole(r){
   $('uName').textContent=user.name;
   $('uBadge').textContent=role.label; $('uBadge').style.background=role.color; $('uBadge').style.color=role.tc;
   $('nav-employees').style.display=(role.canAddEmp||role.canViewAll)?'flex':'none';
+  $('nav-checkin').style.display=role.canViewAll?'flex':'none';
   // 排班功能開關：全公司標準班暫不需要，要啟用改成 true 即可
   const SHOW_SCHEDULE=false;
   // 員工：打卡+請假+代墊，不看排班和薪資
@@ -1725,9 +1742,12 @@ function expCard(e){
   const st={pending:{l:'待審核',c:'pending'},admin_ok:{l:'已核准',c:'approved'},approved:{l:'已核准',c:'approved'},rejected:{l:'已拒絕',c:'rejected'},paid:{l:'已撥款 ✅',c:'paid'}};
   const stInfo=st[e.status]||st.pending;
   let actions='';
-  // 一關制：老闆／行政主管／會計 任一角色核准即可
-  if(e.status==='pending'&&role.canApproveExp)
+  const isOwnClaim = e.empId===S.users[S.role].empId;
+  // 一關制：老闆／行政主管／會計 任一角色核准即可，但不可審核自己的申請（老闆除外）
+  if(e.status==='pending'&&role.canApproveExp&&!(isOwnClaim&&S.role!=='owner'))
     actions+=`<button class="btn-sm approve" onclick="approveExp(${e.id})">✅ 核准</button><button class="btn-sm reject" onclick="rejectExp(${e.id})">❌ 拒絕</button>`;
+  else if(e.status==='pending'&&isOwnClaim&&S.role!=='owner')
+    actions+=`<span style="font-size:11px;color:#aaa">⏳ 待其他審核者處理（本人不可自核）</span>`;
   if(['approved','admin_ok'].includes(e.status)&&role.canMarkPaid)
     actions+=`<button class="btn-sm paid" onclick="markPaid(${e.id})">💸 已撥款</button>`;
   if(e.photoUrl)actions+=`<button class="btn-sm view" onclick="openLightbox('${e.photoUrl}')">🖼️ 照片</button>`;
@@ -1751,6 +1771,8 @@ function expCard(e){
 }
 async function approveExp(id){
   if(!ROLES[S.role].canApproveExp){toast('無權限','err');return;}
+  const exp0=S.expenses.find(e=>e.id===id);
+  if(exp0 && exp0.empId===S.users[S.role].empId && S.role!=='owner'){toast('不可審核自己的代墊申請，請由老闆或其他審核者處理','err');return;}
   try{ await sbPatch('expenses', id, {status:'approved'}); }catch(err){console.error('代墊核准寫入失敗:',err);toast('儲存失敗，請重試','err');return;}
   S.expenses=S.expenses.map(e=>e.id===id?Object.assign({},e,{status:'approved'}):e);
   renderExpensePage();toast('✅ 已核准，將隨薪資撥付','ok');
@@ -1759,6 +1781,8 @@ async function approveExp(id){
 }
 async function rejectExp(id){
   if(!ROLES[S.role].canApproveExp){toast('無權限','err');return;}
+  const exp0=S.expenses.find(e=>e.id===id);
+  if(exp0 && exp0.empId===S.users[S.role].empId && S.role!=='owner'){toast('不可審核自己的代墊申請，請由老闆或其他審核者處理','err');return;}
   try{ await sbPatch('expenses', id, {status:'rejected'}); }catch(err){console.error('代墊拒絕寫入失敗:',err);toast('儲存失敗，請重試','err');return;}
   S.expenses=S.expenses.map(e=>e.id===id?Object.assign({},e,{status:'rejected'}):e);
   renderExpensePage();toast('已拒絕','warn');
@@ -1945,6 +1969,58 @@ function calcMonthlyStats(empId, year, month){
     locations[d].push({type:l.type,time:t,lat:l.lat,lng:l.lng,officeId:l.officeId});
   });
   return {days,lateDays,totalLateMins,overMins,penalty,totalWorkMins,leaves,expAmt,locations};
+}
+
+/* ════════════════════════════════════════
+   獨立「出勤」分頁（老闆／會計／行政主管，永不顯示薪資金額）
+════════════════════════════════════════ */
+let S_ckMonth = new Date().getMonth();
+let S_ckYear  = new Date().getFullYear();
+let S_ckTab   = 1; // 1=遲到總覽 2=請假總覽
+
+function changeCkMonth(dir){
+  S_ckMonth += dir;
+  if(S_ckMonth > 11){ S_ckMonth = 0; S_ckYear++; }
+  if(S_ckMonth < 0) { S_ckMonth = 11; S_ckYear--; }
+  renderCheckinPage();
+}
+function switchCkTab(n){
+  S_ckTab = n;
+  $('ckTab1').style.background = n===1 ? 'var(--gold)' : 'none';
+  $('ckTab1').style.color      = n===1 ? '#1a1808'     : 'var(--gold)';
+  $('ckTab2').style.background = n===2 ? 'var(--gold)' : 'none';
+  $('ckTab2').style.color      = n===2 ? '#1a1808'     : 'var(--gold)';
+  renderCheckinPage();
+}
+
+function renderCheckinPage(){
+  $('ckMonthLabel').textContent = S_ckYear+' 年 '+(S_ckMonth+1)+' 月';
+  const ym = S_ckYear+'-'+String(S_ckMonth+1).padStart(2,'0');
+  const actEmps = S.employees.filter(function(e){return e.status==='active';});
+
+  if(S_ckTab === 1){
+    // 遲到總覽
+    const lateList=actEmps.map(function(e){const st=calcMonthlyStats(e.id,S_ckYear,S_ckMonth);return {e,lateDays:st.lateDays,totalLateMins:st.totalLateMins};}).filter(function(x){return x.lateDays.length>0;});
+    const okList=actEmps.map(function(e){const st=calcMonthlyStats(e.id,S_ckYear,S_ckMonth);return {e,days:Object.keys(st.days).length,late:st.lateDays.length};}).filter(function(x){return x.days>0 && x.late===0;});
+    $('ckContent').innerHTML=
+      '<div class="section"><div class="sec-head">🔴 本月有遲到的員工</div><div style="padding:6px 14px">'+
+      (lateList.length?lateList.map(function(x){return '<div class="comp-item"><div><div style="font-weight:700">'+x.e.name+'</div><div style="font-size:11px;color:#999">遲到 '+x.lateDays.length+' 次・共 '+x.totalLateMins+' 分鐘</div></div><div style="font-size:12px;font-weight:900;color:var(--red)">非全勤</div></div>';}).join(''):
+      '<div style="color:var(--green);font-weight:700;padding:6px 0">🎉 本月全員準時！</div>')+'</div></div>'+
+      '<div class="section"><div class="sec-head">🟢 本月全勤員工</div><div style="padding:6px 14px">'+
+      (okList.length?okList.map(function(x){return '<div class="comp-item"><span style="font-weight:700">'+x.e.name+'</span><span style="font-size:12px;color:var(--green);font-weight:900">✅ 全勤（'+x.days+' 天）</span></div>';}).join(''):
+      '<div style="color:#bbb;font-size:13px">尚無出勤紀錄</div>')+'</div></div>';
+  } else {
+    // 請假總覽
+    const leaveList=actEmps.map(function(e){const leaves=S.leaveRecords.filter(function(r){return r.empId===e.id&&r.status==='approved'&&(r.start||'').startsWith(ym);});return {e,leaves};}).filter(function(x){return x.leaves.length>0;});
+    const noLeaveList=actEmps.map(function(e){const leaves=S.leaveRecords.filter(function(r){return r.empId===e.id&&r.status==='approved'&&(r.start||'').startsWith(ym);});return {e,leaves};}).filter(function(x){return x.leaves.length===0;});
+    $('ckContent').innerHTML=
+      '<div class="section"><div class="sec-head">📋 本月有請假的員工</div><div style="padding:6px 14px">'+
+      (leaveList.length?leaveList.map(function(x){return '<div style="margin-bottom:10px"><div style="font-weight:900;font-size:13px;margin-bottom:4px">'+x.e.name+'</div>'+
+      x.leaves.map(function(r){const p=r.dayPart==='am'?'上半天':r.dayPart==='pm'?'下半天':r.dayPart==='custom'?r.customHours+'小時':'';return '<div style="font-size:12px;color:#666;padding:2px 0">'+r.emoji+' '+r.name+'・'+r.start+(r.start!==r.end?' ～ '+r.end:'')+' '+p+'</div>';}).join('')+'</div>';}).join(''):
+      '<div style="color:#bbb;font-size:13px">本月尚無請假紀錄</div>')+'</div></div>'+
+      '<div class="section"><div class="sec-head">⬜ 本月沒有請假的員工</div><div style="padding:6px 14px;font-size:12px;color:#666;line-height:2">'+
+      (noLeaveList.length?noLeaveList.map(function(x){return x.e.name;}).join('　'):'-')+'</div></div>';
+  }
 }
 
 function renderSalaryPage(){
@@ -2225,6 +2301,7 @@ function switchPage(n){
   if(n==='overtime'){$('otDate').value=today();renderOvertimePage();}
   if(n==='employees')renderEmpList();
   if(n==='salary')renderSalaryPage();
+  if(n==='checkin')renderCheckinPage();
 }
 let _tt;
 function toast(msg,type='ok'){const el=$('toast');el.textContent=msg;el.className=type;el.classList.add('show');clearTimeout(_tt);_tt=setTimeout(()=>el.classList.remove('show'),3000);}
@@ -2268,7 +2345,7 @@ async function initLIFF(){
       $('uBadge').style.background = 'var(--orange)';
       $('uBadge').style.color = 'white';
       // 隱藏所有導覽按鈕
-      ['nav-schedule','nav-leave','nav-expense','nav-overtime','nav-employees','nav-salary'].forEach(id=>{ 
+      ['nav-schedule','nav-leave','nav-expense','nav-overtime','nav-employees','nav-salary','nav-checkin'].forEach(id=>{ 
         var el=$(id); if(el) el.style.display='none';
       });
       // 顯示未綁定畫面
@@ -2300,7 +2377,7 @@ async function initLIFF(){
     if(typeof liff !== 'undefined'){
       document.getElementById('roleSw').style.display='none';
       setRole('staff');
-      ['nav-schedule','nav-leave','nav-expense','nav-overtime','nav-employees','nav-salary'].forEach(id=>{ var el=$(id); if(el) el.style.display='none'; });
+      ['nav-schedule','nav-leave','nav-expense','nav-overtime','nav-employees','nav-salary','nav-checkin'].forEach(id=>{ var el=$(id); if(el) el.style.display='none'; });
       var hero=document.querySelector('.clock-hero');
       if(hero){
         hero.innerHTML=`
