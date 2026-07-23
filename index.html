@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-22-G ═══
-     包含: 22-F 基礎 + 修復代墊清單從未載入的關鍵bug
+<!-- ═══ NOBLE HR 版本: v2026-07-22-H ═══
+     包含: 22-G 基礎 + 員工代墊僅顯本月未結案項目/撥款確認與時間戳/老闆月報加代墊總計
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -928,7 +928,7 @@ async function loadExpenses(empId) {
         cat: e.cat, catName: e.cat_name, desc: e.description,
         invoice: e.invoice, amount: e.amount,
         photoUrl: e.photo_url || '', status: e.status,
-        createdAt: e.created_at,
+        createdAt: e.created_at, paidAt: e.paid_at || null,
       }));
       renderExpensePage();
     }
@@ -1729,10 +1729,12 @@ async function submitExpense(){
 }
 function renderExpensePage(){
   const role=ROLES[S.role];const u=S.users[S.role];
-  const mine=S.expenses.filter(e=>e.empId===u.empId);
-  const approvedTotal=mine.filter(e=>['approved','paid'].includes(e.status)).reduce((s,e)=>s+e.amount,0);
-  $('myExpTotal').textContent=approvedTotal>0?`已核准 NT$${approvedTotal.toLocaleString()}`:'';
-  // 有 canViewAll 權限（老闆/行政主管/會計）看全部員工的代墊，才能審核；員工只看自己的
+  const ym=today().slice(0,7);
+  // 員工自己：只看本月申請，且已核准/已撥款（已處理完成）的就從自己畫面移除
+  const mine=S.expenses.filter(e=>e.empId===u.empId && (e.date||'').startsWith(ym) && !['approved','paid'].includes(e.status));
+  const approvedTotal=S.expenses.filter(e=>e.empId===u.empId&&['approved','paid'].includes(e.status)&&(e.date||'').startsWith(ym)).reduce((s,e)=>s+e.amount,0);
+  $('myExpTotal').textContent=approvedTotal>0?`本月已核准 NT$${approvedTotal.toLocaleString()}`:'';
+  // 有 canViewAll 權限（老闆/行政主管/會計）看全部員工的代墊（含歷史），才能審核；員工只看本月待處理
   const list=role.canViewAll?S.expenses:mine;
   $('myExpList').innerHTML=list.length?list.map(e=>expCard(e)).join(''):'<div class="empty">尚無申請紀錄</div>';
 }
@@ -1763,6 +1765,7 @@ function expCard(e){
         <div class="exp-amt">NT$${e.amount.toLocaleString()}</div>
         <div class="exp-invoice">${e.invoice?'發票：'+e.invoice:'收據'}</div>
         <span class="exp-status ${stInfo.c}">${stInfo.l}</span>
+        ${e.status==='paid'&&e.paidAt?`<div style="font-size:10px;color:#999;margin-top:2px">${new Date(e.paidAt).toLocaleDateString('zh-TW')} 已撥款</div>`:''}
       </div>
     </div>
     <div class="exp-desc">${e.desc}</div>
@@ -1791,9 +1794,12 @@ async function rejectExp(id){
 }
 async function markPaid(id){
   if(!ROLES[S.role].canMarkPaid){toast('無權限','err');return;}
-  try{ await sbPatch('expenses', id, {status:'paid'}); }catch(err){console.error('撥款標記寫入失敗:',err);toast('儲存失敗，請重試','err');return;}
-  S.expenses=S.expenses.map(e=>e.id===id?Object.assign({},e,{status:'paid'}):e);
-  renderExpensePage();toast('💸 已標記撥款','ok');
+  const exp=S.expenses.find(e=>e.id===id);
+  if(!confirm(`確認已將 NT$${exp?exp.amount.toLocaleString():''} 撥款給「${exp?exp.empName:''}」？\n此動作將記錄撥款時間，作為對帳依據。`))return;
+  const paidAt=new Date().toISOString();
+  try{ await sbPatch('expenses', id, {status:'paid', paid_at:paidAt}); }catch(err){console.error('撥款標記寫入失敗:',err);toast('儲存失敗，請重試','err');return;}
+  S.expenses=S.expenses.map(e=>e.id===id?Object.assign({},e,{status:'paid',paidAt}):e);
+  renderExpensePage();toast('💸 已標記撥款並記錄時間','ok');
 }
 
 /* ════════════════════════════════════════
@@ -2102,6 +2108,10 @@ function renderAllReport(role){
           return '<div style="font-size:12px;color:#666;padding:2px 0">'+d.slice(5)+'：'+pin+'</div>';
         }).join('')+'</div>';
     }).join('');
+    // 全員本月已核准代墊總計
+    const expList=actEmps.map(function(e){const st=calcMonthlyStats(e.id,S_rptYear,S_rptMonth);return {e,amt:st.expAmt};}).filter(function(x){return x.amt>0;});
+    const expTotalOwner=expList.reduce(function(s,x){return s+x.amt;},0);
+    const fmtO=function(n){return 'NT$'+n.toLocaleString();};
     $('salContent').innerHTML=
       '<div class="section"><div class="sec-head">🔴 本月有遲到的員工</div><div style="padding:6px 14px">'+
       (lateList.length?lateList.map(function(x){return '<div class="comp-item"><div><div style="font-weight:700">'+x.e.name+'</div><div style="font-size:11px;color:#999">遲到 '+x.lateDays.length+' 次・共 '+x.totalLateMins+' 分鐘</div></div><div style="font-size:12px;font-weight:900;color:var(--red)">非全勤</div></div>';}).join(''):
@@ -2110,6 +2120,10 @@ function renderAllReport(role){
       (leaveList.length?leaveList.map(function(x){return '<div style="margin-bottom:10px"><div style="font-weight:900;font-size:13px;margin-bottom:4px">'+x.e.name+'</div>'+
       x.leaves.map(function(r){const p=r.dayPart==='am'?'上半天':r.dayPart==='pm'?'下半天':r.dayPart==='custom'?r.customHours+'小時':'';return '<div style="font-size:12px;color:#666;padding:2px 0">'+r.emoji+' '+r.name+'・'+r.start+(r.start!==r.end?' ～ '+r.end:'')+' '+p+'</div>';}).join('')+'</div>';}).join(''):
       '<div style="color:#bbb;font-size:13px">本月尚無請假紀錄</div>')+'</div></div>'+
+      '<div class="section"><div class="sec-head">💳 本月已核准代墊總計</div><div style="padding:6px 14px">'+
+      (expList.length?expList.map(function(x){return '<div class="comp-item"><span style="font-weight:700">'+x.e.name+'</span><span style="font-weight:900;color:var(--teal)">'+fmtO(x.amt)+'</span></div>';}).join('')+
+      '<div class="comp-item" style="border-top:1.5px solid var(--gold);margin-top:6px;padding-top:6px"><span style="font-weight:900">全員合計</span><span style="font-weight:900;color:var(--teal)">'+fmtO(expTotalOwner)+'</span></div>':
+      '<div style="color:#bbb;font-size:13px">本月尚無已核准代墊</div>')+'</div></div>'+
       (remoteHtml?'<div class="section"><div class="sec-head">📍 外勤打卡地點抽查</div><div style="padding:6px 14px">'+remoteHtml+'</div></div>':'');
     return;
   }
