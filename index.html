@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-22-F ═══
-     包含: 22-E 基礎 + 禁止自核代墊(老闆除外)
+<!-- ═══ NOBLE HR 版本: v2026-07-22-G ═══
+     包含: 22-F 基礎 + 修復代墊清單從未載入的關鍵bug
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -921,7 +921,7 @@ async function loadExpenses(empId) {
     const params = {'order': 'created_at.desc'};
     if(empId) params['emp_id'] = 'eq.' + empId;
     const data = await sbGet('expenses', params);
-    if(data && Array.isArray(data) && data.length > 0){
+    if(data && Array.isArray(data)){
       S.expenses = data.map(e => ({
         id: e.id, empId: e.emp_id, empName: e.emp_name,
         date: e.date, caseId: e.case_id, caseName: e.case_name,
@@ -2297,7 +2297,11 @@ function switchPage(n){
       renderLeaveRecs();
     });
   }
-  if(n==='expense')renderExpensePage();
+  if(n==='expense'){
+    const role=ROLES[S.role]; const u=S.users[S.role];
+    loadExpenses(role.canViewAll ? null : u.empId).then(()=>renderExpensePage());
+    renderExpensePage();
+  }
   if(n==='overtime'){$('otDate').value=today();renderOvertimePage();}
   if(n==='employees')renderEmpList();
   if(n==='salary')renderSalaryPage();
@@ -2408,6 +2412,7 @@ async function initLIFF(){
     initLIFF();
     loadOvertimes().then(()=>{ try{renderOvertimePage();renderLeaveGrid();}catch(e){} });
     loadMakeups();
+    { const _role=ROLES[S.role]; const _u=S.users[S.role]; loadExpenses(_role.canViewAll ? null : _u.empId); }
     loadAllCheckins();
     loadHolidays().then(()=>{
       try{
