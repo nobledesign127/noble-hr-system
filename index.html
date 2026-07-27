@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-27-B ═══
-     包含: 27-A 基礎 + 修復核心bug:補卡申請清單與審核功能從未實作(從送出就看不到、更不能核准)
+<!-- ═══ NOBLE HR 版本: v2026-07-27-D ═══
+     包含: 27-C 基礎 + 09:30全勤名單加規則:當月已核准補卡不超過2次
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -575,6 +575,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
   <div style="display:flex;gap:0;margin:0 14px 12px;border-radius:12px;overflow:hidden;border:1.5px solid var(--gold)">
     <button id="ckTab1" onclick="switchCkTab(1)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:var(--gold);color:#1a1808;cursor:pointer">🔴 遲到總覽</button>
     <button id="ckTab2" onclick="switchCkTab(2)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">📋 請假總覽</button>
+    <button id="ckTab3" onclick="switchCkTab(3)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">🏆 全勤名單</button>
   </div>
   <div style="display:flex;align-items:center;gap:8px;margin:0 14px 14px">
     <button onclick="changeCkMonth(-1)" style="border:none;background:var(--mist);border-radius:8px;padding:6px 14px;font-size:18px;cursor:pointer">‹</button>
@@ -2071,6 +2072,40 @@ function calcMonthlyStats(empId, year, month){
   return {days,lateDays,totalLateMins,overMins,penalty,totalWorkMins,leaves,expAmt,locations};
 }
 
+// 全勤名單：整月上班一次都沒晚過（分 9:00 / 9:30 兩個門檻），且當月沒有病假或事假
+// 只計「有出勤紀錄」的員工（整月都在請假、完全沒打卡的人不列入，避免誤判為全勤）
+function getPerfectAttendanceLists(year, month){
+  const actEmps = S.employees.filter(function(e){ return e.status==='active'; });
+  const ym = year+'-'+String(month+1).padStart(2,'0');
+  const list900=[], list930=[];
+  actEmps.forEach(function(e){
+    const st = calcMonthlyStats(e.id, year, month);
+    const presentDays = Object.entries(st.days).filter(function(entry){ return entry[1].in; });
+    if(!presentDays.length) return; // 整月沒打過卡，不列入全勤名單
+    const hasSickOrPersonal = st.leaves.some(function(l){ return l.type==='sick' || l.type==='personal'; });
+    if(hasSickOrPersonal) return;
+    const all900 = presentDays.every(function(entry){ return entry[1].in <= '09:00'; });
+    const all930 = presentDays.every(function(entry){ return entry[1].in <= '09:30'; });
+    if(all900) list900.push(e.name);
+    if(all930){
+      // 09:30 名單額外規則：當月「已核准」的補卡申請不可超過 2 次
+      const approvedMakeups = (S.makeupRecords||[]).filter(function(m){
+        return m.empId===e.id && m.status==='approved' && (m.date||'').startsWith(ym);
+      }).length;
+      if(approvedMakeups <= 2) list930.push(e.name);
+    }
+  });
+  return { list900: list900, list930: list930 };
+}
+function renderPerfectAttendanceHTML(year, month){
+  const r = getPerfectAttendanceLists(year, month);
+  const row=(title,names)=>`<div style="margin-bottom:10px">
+    <div style="font-weight:900;font-size:12px;color:#888;margin-bottom:4px">${title}</div>
+    <div style="font-size:13px;color:var(--ink)">${names.length?names.join('、'):'<span style="color:#bbb">本月無人達成</span>'}</div>
+  </div>`;
+  return row('🌅 全月 09:00 前到班（且無病假/事假）', r.list900) + row('🏆 全月 09:30 前到班（且無病假/事假、補卡不超過2次）', r.list930);
+}
+
 /* ════════════════════════════════════════
    獨立「出勤」分頁（老闆／會計／行政主管，永不顯示薪資金額）
 ════════════════════════════════════════ */
@@ -2090,6 +2125,8 @@ function switchCkTab(n){
   $('ckTab1').style.color      = n===1 ? '#1a1808'     : 'var(--gold)';
   $('ckTab2').style.background = n===2 ? 'var(--gold)' : 'none';
   $('ckTab2').style.color      = n===2 ? '#1a1808'     : 'var(--gold)';
+  $('ckTab3').style.background = n===3 ? 'var(--gold)' : 'none';
+  $('ckTab3').style.color      = n===3 ? '#1a1808'     : 'var(--gold)';
   renderCheckinPage();
 }
 
@@ -2109,6 +2146,12 @@ function renderCheckinPage(){
       '<div class="section"><div class="sec-head">🟢 本月全勤員工</div><div style="padding:6px 14px">'+
       (okList.length?okList.map(function(x){return '<div class="comp-item"><span style="font-weight:700">'+x.e.name+'</span><span style="font-size:12px;color:var(--green);font-weight:900">✅ 全勤（'+x.days+' 天）</span></div>';}).join(''):
       '<div style="color:#bbb;font-size:13px">尚無出勤紀錄</div>')+'</div></div>';
+  } else if(S_ckTab === 3){
+    // 全勤名單（9:00 / 9:30 兩種門檻，且當月無病假事假）
+    $('ckContent').innerHTML =
+      '<div class="section"><div class="sec-head">🏆 全勤名單</div><div style="padding:10px 14px">'+
+      renderPerfectAttendanceHTML(S_ckYear, S_ckMonth) +
+      '</div></div>';
   } else {
     // 請假總覽
     const leaveList=actEmps.map(function(e){const leaves=S.leaveRecords.filter(function(r){return r.empId===e.id&&r.status==='approved'&&(r.start||'').startsWith(ym);});return {e,leaves};}).filter(function(x){return x.leaves.length>0;});
@@ -2218,7 +2261,8 @@ function renderAllReport(role){
       (expList.length?expList.map(function(x){return '<div class="comp-item"><span style="font-weight:700">'+x.e.name+'</span><span style="font-weight:900;color:var(--teal)">'+fmtO(x.amt)+'</span></div>';}).join('')+
       '<div class="comp-item" style="border-top:1.5px solid var(--gold);margin-top:6px;padding-top:6px"><span style="font-weight:900">全員合計</span><span style="font-weight:900;color:var(--teal)">'+fmtO(expTotalOwner)+'</span></div>':
       '<div style="color:#bbb;font-size:13px">本月尚無已核准代墊</div>')+'</div></div>'+
-      (remoteHtml?'<div class="section"><div class="sec-head">📍 外勤打卡地點抽查</div><div style="padding:6px 14px">'+remoteHtml+'</div></div>':'');
+      (remoteHtml?'<div class="section"><div class="sec-head">📍 外勤打卡地點抽查</div><div style="padding:6px 14px">'+remoteHtml+'</div></div>':'')+
+      '<div class="section"><div class="sec-head">🏆 全勤名單</div><div style="padding:10px 14px">'+renderPerfectAttendanceHTML(S_rptYear,S_rptMonth)+'</div></div>';
     return;
   }
   const rows=actEmps.map(function(e){const st=calcMonthlyStats(e.id,S_rptYear,S_rptMonth);const isPartTime=e.role==='工讀生';const totalH=(st.totalWorkMins/60).toFixed(1);return {e,st,isPartTime,totalH};});
@@ -2252,7 +2296,8 @@ function renderAllReport(role){
     tableRows+'</table></div></div>'+
     (expTotal>0?'<div class="section"><div class="sec-head">💳 本月代墊彙整</div><div style="padding:6px 14px">'+expRows+
     '<div class="comp-item" style="border-top:1.5px solid var(--gold);margin-top:6px;padding-top:6px"><span style="font-weight:900">本月代墊總計</span><span style="font-weight:900;color:var(--teal)">'+fmt(expTotal)+'</span></div></div></div>':'')+
-    (locHtml?'<div class="section"><div class="sec-head">📍 外勤打卡地點明細</div><div style="padding:6px 14px">'+locHtml+'</div></div>':'');
+    (locHtml?'<div class="section"><div class="sec-head">📍 外勤打卡地點明細</div><div style="padding:6px 14px">'+locHtml+'</div></div>':'')+
+    '<div class="section"><div class="sec-head">🏆 全勤名單</div><div style="padding:10px 14px">'+renderPerfectAttendanceHTML(S_rptYear,S_rptMonth)+'</div></div>';
 }
 
 function openSalaryModal(empId){
