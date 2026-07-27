@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-22-H ═══
-     包含: 22-G 基礎 + 員工代墊僅顯本月未結案項目/撥款確認與時間戳/老闆月報加代墊總計
+<!-- ═══ NOBLE HR 版本: v2026-07-27-A ═══
+     包含: 22-H 基礎 + 修復核心bug:打卡狀態改為向資料庫核對，不再只靠記憶體判斷
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -1213,6 +1213,40 @@ function enableBtn(){
   else{b.className='btn-clock '+(sh.key==='night'?'night-in':'in');$('btnIcon').textContent='🟢';$('btnLabel').textContent='上班打卡';}
 }
 
+// 核心修復：每次開啟系統都向資料庫核對「今天實際打卡狀態」，
+// 不再只依賴記憶體變數（記憶體變數在重新整理/關閉重開後會歸零，導致誤判成「還沒上班」）
+async function syncTodayClockStatus(){
+  try{
+    const u = S.users[S.role];
+    if(!u || !u.empId) return;
+    const todayStr = today();
+    const data = await sbGet('checkins', {
+      emp_id: 'eq.' + u.empId,
+      order: 'checked_at.desc',
+      limit: '20'
+    });
+    if(!data || !Array.isArray(data)) return;
+    // 篩出「今天（台北時間）」的紀錄
+    const todays = data.filter(c => {
+      const d = new Date(new Date(c.checked_at).getTime() + 8*3600000);
+      const ds = d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0');
+      return ds === todayStr;
+    }).sort((a,b)=> new Date(a.checked_at) - new Date(b.checked_at));
+    if(!todays.length){ S.clockedIn=false; S.inTime=null; S.inDate=null; return; }
+    const lastIn  = [...todays].reverse().find(c=>c.type==='in');
+    const lastOut = [...todays].reverse().find(c=>c.type==='out');
+    const timeOf = c => { const d=new Date(new Date(c.checked_at).getTime()+8*3600000); return String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0'); };
+    if(lastIn){
+      $('sIn').textContent = timeOf(lastIn); $('sInNote').textContent='';
+      S.inTime = timeOf(lastIn); S.inDate = todayStr;
+    }
+    if(lastOut){ $('sOut').textContent = timeOf(lastOut); $('sOutNote').textContent='完成'; }
+    // 只要今天最後一筆是 in（還沒打下班），就視為「已上班、待下班」
+    S.clockedIn = !!(lastIn && (!lastOut || new Date(lastIn.checked_at) > new Date(lastOut.checked_at)));
+    if($('btnClock')) enableBtn();
+  }catch(e){ console.error('syncTodayClockStatus 錯誤：', e); }
+}
+
 /* ════════════════════════════════════════
    打卡
 ════════════════════════════════════════ */
@@ -2354,6 +2388,7 @@ async function initLIFF(){
       const autoRole = roleMap[matched.systemRole] || 'staff';
       S.users[autoRole] = {name:matched.name,avatar:matched.avatar,empId:matched.id,hireDate:matched.hireDate};
       setRole(autoRole);
+      syncTodayClockStatus();
     } else {
       // 未綁定：強制 staff 最低權限，隱藏所有導覽，只顯示未綁定畫面
       setRole('staff');
