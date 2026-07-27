@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-27-A ═══
-     包含: 22-H 基礎 + 修復核心bug:打卡狀態改為向資料庫核對，不再只靠記憶體判斷
+<!-- ═══ NOBLE HR 版本: v2026-07-27-B ═══
+     包含: 27-A 基礎 + 修復核心bug:補卡申請清單與審核功能從未實作(從送出就看不到、更不能核准)
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -349,6 +349,12 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
       </div>
       <button class="btn-sub purple" onclick="submitMakeup()">送出補卡申請 →</button>
     </div>
+  </div>
+
+  <!-- 補卡紀錄與審核（缺漏補上） -->
+  <div class="section">
+    <div class="sec-head">🕐 補卡申請紀錄</div>
+    <div class="log-list" id="mkList"><div class="empty">尚無補卡申請</div></div>
   </div>
 </div>
 
@@ -1349,8 +1355,61 @@ async function loadMakeups(){
     const data=await api('GET','/api/makeups');
     if(Array.isArray(data)){
       S.makeupRecords=data.map(m=>({id:m.id,empId:m.emp_id,date:m.date,type:m.type,time:m.time,shiftKey:m.shift_key,reason:m.reason,status:m.status||'pending',createdAt:m.created_at}));
+      renderMakeupList();
     }
   }catch(e){console.error('loadMakeups 錯誤：',e);}
+}
+function renderMakeupList(){
+  const el=$('mkList'); if(!el)return;
+  const role=ROLES[S.role]; const u=S.users[S.role];
+  // 老闆/行政主管看全部（才能審核），一般員工只看自己的
+  const list=role.canViewAll ? S.makeupRecords : S.makeupRecords.filter(m=>m.empId===u.empId);
+  const sorted=[...list].sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+  if(!sorted.length){ el.innerHTML='<div class="empty">尚無補卡申請</div>'; return; }
+  const empName=id=>{ const e=S.employees.find(x=>x.id===id); return e?e.name:id; };
+  const typeLabel={in:'上班卡',out:'下班卡'};
+  const stMap={pending:{l:'待審核',c:'#e6a817'},approved:{l:'已核准',c:'var(--green)'},rejected:{l:'已拒絕',c:'var(--red)'}};
+  el.innerHTML=sorted.map(m=>{
+    const st=stMap[m.status]||stMap.pending;
+    const canApprove = m.status==='pending' && S.role==='owner';
+    return `<div class="log-item" style="flex-direction:column;align-items:stretch;gap:6px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><b>${role.canViewAll?empName(m.empId)+'　':''}${m.date}</b>　${typeLabel[m.type]||m.type}　${m.time||''}</div>
+        <span style="color:${st.c};font-weight:900;font-size:12px">${st.l}</span>
+      </div>
+      <div style="font-size:12px;color:#888">${m.reason||''}</div>
+      ${canApprove?`<div style="display:flex;gap:8px;margin-top:4px">
+        <button class="btn-sm approve" onclick="approveMakeup(${m.id})">✅ 核准</button>
+        <button class="btn-sm reject" onclick="rejectMakeup(${m.id})">❌ 拒絕</button>
+      </div>`:''}
+    </div>`;
+  }).join('');
+}
+async function approveMakeup(id){
+  if(S.role!=='owner'){toast('只有老闆可核准補卡','err');return;}
+  const mk=S.makeupRecords.find(m=>m.id===id); if(!mk)return;
+  try{
+    await api('PATCH','/api/makeups/'+id,{status:'approved'});
+    // 核准後，把「員工申請的實際時間」（不是核准當下時間）補進正式打卡紀錄
+    const checkedAtUTC = new Date(mk.date+'T'+mk.time+':00+08:00').toISOString();
+    await sbPost('checkins', {
+      emp_id: mk.empId, type: mk.type,
+      lat: null, lng: null, office_id: 'makeup', shift_key: mk.shiftKey,
+      checked_at: checkedAtUTC
+    });
+  }catch(e){ console.error('approveMakeup 錯誤：', e); toast('核准失敗，請重試','err'); return; }
+  S.makeupRecords=S.makeupRecords.map(m=>m.id===id?Object.assign({},m,{status:'approved'}):m);
+  renderMakeupList();
+  toast('✅ 已核准補卡，已補進打卡紀錄','ok');
+  const empName=(S.employees.find(e=>e.id===mk.empId)||{}).name||mk.empId;
+  sendLineMsg(`✅ 補卡核准通知\n\n員工：${empName}\n日期：${mk.date}\n類型：${mk.type==='in'?'上班卡':'下班卡'}\n時間：${mk.time}`);
+}
+async function rejectMakeup(id){
+  if(S.role!=='owner'){toast('只有老闆可拒絕補卡','err');return;}
+  try{ await api('PATCH','/api/makeups/'+id,{status:'rejected'}); }catch(e){ console.error('rejectMakeup 錯誤：', e); }
+  S.makeupRecords=S.makeupRecords.map(m=>m.id===id?Object.assign({},m,{status:'rejected'}):m);
+  renderMakeupList();
+  toast('已拒絕補卡','warn');
 }
 async function submitMakeup(){
   const date=$('mkDate').value,type=$('mkType').value,time=$('mkTime').value,reason=$('mkReason').value.trim();
@@ -1376,6 +1435,7 @@ async function submitMakeup(){
   });
   if(saved && saved.id){
     S.makeupRecords.unshift({id:saved.id,empId:targetId,date,type,time,reason,status:'pending'});
+    renderMakeupList();
     $('mkDate').value=today();$('mkTime').value=$('mkReason').value='';
     toast('📋 補卡申請已送出，等待老闆審核','ok');
     const typeLabel=type==='in'?'上班卡':'下班卡';
