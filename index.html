@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-27-D ═══
-     包含: 27-C 基礎 + 09:30全勤名單加規則:當月已核准補卡不超過2次
+<!-- ═══ NOBLE HR 版本: v2026-07-27-E ═══
+     包含: 27-D 基礎 + 代墊「撤銷撥款」按鈕(只有老闆可操作)
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -1847,6 +1847,8 @@ function expCard(e){
     actions+=`<span style="font-size:11px;color:#aaa">⏳ 待其他審核者處理（本人不可自核）</span>`;
   if(['approved','admin_ok'].includes(e.status)&&role.canMarkPaid)
     actions+=`<button class="btn-sm paid" onclick="markPaid(${e.id})">💸 已撥款</button>`;
+  if(e.status==='paid'&&S.role==='owner')
+    actions+=`<button class="btn-sm" style="background:#fdf0e0;color:#a15c1a" onclick="undoPaid(${e.id})">↩️ 撤銷撥款</button>`;
   if(e.photoUrl)actions+=`<button class="btn-sm view" onclick="openLightbox('${e.photoUrl}')">🖼️ 照片</button>`;
   return `<div class="exp-card">
     <div class="exp-top">
@@ -1895,6 +1897,14 @@ async function markPaid(id){
   try{ await sbPatch('expenses', id, {status:'paid', paid_at:paidAt}); }catch(err){console.error('撥款標記寫入失敗:',err);toast('儲存失敗，請重試','err');return;}
   S.expenses=S.expenses.map(e=>e.id===id?Object.assign({},e,{status:'paid',paidAt}):e);
   renderExpensePage();toast('💸 已標記撥款並記錄時間','ok');
+}
+async function undoPaid(id){
+  if(S.role!=='owner'){toast('只有老闆可撤銷撥款狀態','err');return;}
+  const exp=S.expenses.find(e=>e.id===id);
+  if(!confirm(`確定撤銷「${exp?exp.empName:''}」NT$${exp?exp.amount.toLocaleString():''} 的已撥款狀態？\n將退回「已核准」，撥款時間紀錄會被清除。`))return;
+  try{ await sbPatch('expenses', id, {status:'approved', paid_at:null}); }catch(err){console.error('撤銷撥款寫入失敗:',err);toast('儲存失敗，請重試','err');return;}
+  S.expenses=S.expenses.map(e=>e.id===id?Object.assign({},e,{status:'approved',paidAt:null}):e);
+  renderExpensePage();toast('↩️ 已撤銷撥款，退回「已核准」','ok');
 }
 
 /* ════════════════════════════════════════
