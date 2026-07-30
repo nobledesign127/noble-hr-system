@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-27-E ═══
-     包含: 27-D 基礎 + 代墊「撤銷撥款」按鈕(只有老闆可操作)
+<!-- ═══ NOBLE HR 版本: v2026-07-27-F ═══
+     包含: 27-E 基礎 + 修復核心bug:本月緩衝額度改向資料庫核對(不再只靠記憶體，重開不再歸零)
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -1254,6 +1254,45 @@ async function syncTodayClockStatus(){
   }catch(e){ console.error('syncTodayClockStatus 錯誤：', e); }
 }
 
+// 核心修復：本月緩衝額度改為向資料庫核對「這個月實際遲到總分鐘數」，
+// 不再只靠記憶體變數（記憶體變數在重新整理/關閉重開後會歸零，導致誤以為緩衝從沒用過）
+async function syncMonthlyBuffer(){
+  try{
+    const u = S.users[S.role];
+    if(!u || !u.empId) return;
+    const now = new Date();
+    const year = now.getFullYear(), month = now.getMonth(); // 0-based，符合 calcMonthlyStats 的用法
+    const ym = year+'-'+String(month+1).padStart(2,'0');
+    // 直接查這個月的打卡（獨立查詢，避免受 S.allCheckins 載入時序影響）
+    const data = await sbGet('checkins', {
+      emp_id: 'eq.' + u.empId,
+      checked_at: ['gte.' + new Date(Date.UTC(year, month, 1, 0,0,0) - 8*3600000).toISOString(),
+                   'lt.'  + new Date(Date.UTC(year, month+1, 1, 0,0,0) - 8*3600000).toISOString()],
+      order: 'checked_at.asc'
+    });
+    if(!data || !Array.isArray(data)) return;
+    // 依日期整理每天最早的上班時間
+    const days = {};
+    data.forEach(c=>{
+      if(c.type!=='in') return;
+      const d = new Date(new Date(c.checked_at).getTime()+8*3600000);
+      const ds = d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0');
+      const ts = String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0');
+      if(!days[ds] || ts < days[ds]) days[ds] = ts;
+    });
+    const GRACE = '09:30';
+    let totalLateMins = 0;
+    Object.values(days).forEach(t=>{
+      if(t > GRACE){
+        const gp=[9,30], tp=t.split(':').map(Number);
+        totalLateMins += (tp[0]*60+tp[1]) - (gp[0]*60+gp[1]);
+      }
+    });
+    S.buf.usedMins = Math.min(S.buf.totalMins, totalLateMins);
+    if($('bufDetail')) renderBuffer();
+  }catch(e){ console.error('syncMonthlyBuffer 錯誤：', e); }
+}
+
 /* ════════════════════════════════════════
    打卡
 ════════════════════════════════════════ */
@@ -2504,6 +2543,7 @@ async function initLIFF(){
       S.users[autoRole] = {name:matched.name,avatar:matched.avatar,empId:matched.id,hireDate:matched.hireDate};
       setRole(autoRole);
       syncTodayClockStatus();
+      syncMonthlyBuffer();
     } else {
       // 未綁定：強制 staff 最低權限，隱藏所有導覽，只顯示未綁定畫面
       setRole('staff');
