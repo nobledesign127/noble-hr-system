@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-27-F ═══
-     包含: 27-E 基礎 + 修復核心bug:本月緩衝額度改向資料庫核對(不再只靠記憶體，重開不再歸零)
+<!-- ═══ NOBLE HR 版本: v2026-07-27-G ═══
+     包含: 27-F 基礎 + 真正修復緩衝額度bug(sbGet不支援陣列條件導致查詢失效，改用單一查詢+前端篩選)
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -1261,22 +1261,22 @@ async function syncMonthlyBuffer(){
     const u = S.users[S.role];
     if(!u || !u.empId) return;
     const now = new Date();
-    const year = now.getFullYear(), month = now.getMonth(); // 0-based，符合 calcMonthlyStats 的用法
+    const year = now.getFullYear(), month = now.getMonth(); // 0-based
     const ym = year+'-'+String(month+1).padStart(2,'0');
-    // 直接查這個月的打卡（獨立查詢，避免受 S.allCheckins 載入時序影響）
+    // 抓這個員工近期打卡（避免用陣列條件——sbGet 不支援同欄位多條件，會產生無效查詢）
     const data = await sbGet('checkins', {
       emp_id: 'eq.' + u.empId,
-      checked_at: ['gte.' + new Date(Date.UTC(year, month, 1, 0,0,0) - 8*3600000).toISOString(),
-                   'lt.'  + new Date(Date.UTC(year, month+1, 1, 0,0,0) - 8*3600000).toISOString()],
-      order: 'checked_at.asc'
+      order: 'checked_at.desc',
+      limit: '500'
     });
     if(!data || !Array.isArray(data)) return;
-    // 依日期整理每天最早的上班時間
+    // 依日期整理「這個月」每天最早的上班時間（在瀏覽器端篩選月份，換算台北時間）
     const days = {};
     data.forEach(c=>{
       if(c.type!=='in') return;
       const d = new Date(new Date(c.checked_at).getTime()+8*3600000);
       const ds = d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0');
+      if(!ds.startsWith(ym)) return;
       const ts = String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0');
       if(!days[ds] || ts < days[ds]) days[ds] = ts;
     });
