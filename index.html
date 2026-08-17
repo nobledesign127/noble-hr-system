@@ -1,6 +1,9 @@
+
+
+Index · HTML
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-29-C ═══
-     包含: 29-B 基礎 + 打卡改成固定「上班/下班」兩顆並排按鈕，各自依當日狀態獨立鎖定
+<!-- ═══ NOBLE HR 版本: v2026-07-29-D ═══
+     包含: 29-C 基礎 + 每日明細升級(比照NUEiP)：每人每天一列，含休息日/國定假日/請假/缺卡/遲到分鐘/職稱，地點仍僅老闆可見
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -14,7 +17,7 @@
 <meta name="theme-color" content="#C9A84C"/>
 <!-- LINE LIFF SDK -->
 <script src="https://static.line-scdn.net/liff/edge/versions/2.22.3/sdk.js"></script>
-
+ 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -31,7 +34,7 @@
 }
 html,body{height:100%;font-family:'Noto Sans TC',sans-serif;background:var(--dark);color:var(--ink);overflow-x:hidden}
 #app{min-height:100vh;display:flex;flex-direction:column;max-width:430px;margin:0 auto;background:var(--mist)}
-
+ 
 /* ── HEADER ─────────────────────────── */
 header{background:linear-gradient(160deg,#12121E,#1A1A32);padding:14px 16px 0;position:relative}
 header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20px;background:var(--mist);border-radius:20px 20px 0 0}
@@ -50,7 +53,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 .u-av{width:26px;height:26px;border-radius:50%;font-size:12px;font-weight:900;display:flex;align-items:center;justify-content:center}
 .u-name{color:var(--white);font-size:12px;font-weight:700}
 .u-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px;margin-left:auto}
-
+ 
 /* ── CLOCK HERO ─────────────────────── */
 .clock-hero{background:var(--white);border-radius:var(--radius);margin:14px;padding:18px;box-shadow:0 4px 20px rgba(0,0,0,.07)}
 .clk-date{font-size:11px;color:#999}
@@ -61,13 +64,13 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 .shift-card.noon{background:var(--orange-lt)}.shift-card.night{background:var(--purple-lt)}.shift-card.custom{background:var(--teal-lt)}
 .sc-info{flex:1}.sc-name{font-size:13px;font-weight:900}.sc-time{font-size:10px;opacity:.8;margin-top:1px}
 .sc-edit{font-size:10px;font-weight:700;background:rgba(0,0,0,.08);border:none;border-radius:7px;padding:3px 8px;cursor:pointer}
-
+ 
 /* ── BANNER ─────────────────────────── */
 .banner{border-radius:10px;padding:8px 12px;margin-bottom:9px;font-size:11px;font-weight:600;display:flex;align-items:flex-start;gap:6px;line-height:1.5}
 .banner.ok{background:var(--green-lt);color:var(--green)}.banner.flex{background:var(--blue-lt);color:var(--blue)}
 .banner.buf{background:var(--orange-lt);color:var(--orange)}.banner.over{background:var(--red-lt);color:var(--red)}
 .banner.info{background:#F3F4F6;color:#555}.banner.night{background:var(--purple-lt);color:var(--purple)}
-
+ 
 /* ── GPS ────────────────────────────── */
 .gps-bar{background:var(--mist);border-radius:8px;padding:7px 11px;display:flex;align-items:center;gap:7px;margin-bottom:8px;font-size:11px;transition:background .3s}
 .gps-bar.ok{background:var(--green-lt);color:var(--green)}.gps-bar.fail{background:var(--red-lt);color:var(--red)}.gps-bar.loading{background:var(--orange-lt);color:var(--orange)}
@@ -76,7 +79,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
 .map-box{height:90px;background:linear-gradient(135deg,#E8F5E9,#C8E6C9);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;margin-bottom:9px;font-size:12px;font-weight:600;color:var(--green)}
 .map-coords{font-size:9px;color:#666;font-family:monospace}
-
+ 
 /* ── BUTTONS ────────────────────────── */
 .btn-clock{width:100%;padding:14px;border:none;border-radius:13px;font-size:16px;font-weight:900;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;transition:transform .12s}
 .btn-clock:active{transform:scale(.97)}.btn-clock.in{background:var(--green);color:var(--white)}
@@ -89,19 +92,19 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 .btn-sm{padding:5px 9px;border:none;border-radius:7px;font-size:10px;font-weight:700;cursor:pointer}
 .btn-sm.approve{background:var(--green-lt);color:var(--green)}.btn-sm.reject{background:var(--red-lt);color:var(--red)}
 .btn-sm.paid{background:var(--teal-lt);color:var(--teal)}.btn-sm.view{background:var(--blue-lt);color:var(--blue)}
-
+ 
 /* ── STATUS ROW ─────────────────────── */
 .status-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin:0 14px 10px}
 .stat-card{background:var(--white);border-radius:12px;padding:10px;box-shadow:0 2px 8px rgba(0,0,0,.05)}
 .stat-lbl{font-size:9px;color:#aaa;margin-bottom:2px}.stat-val{font-size:15px;font-weight:900;color:var(--ink)}
 .stat-val.ok{color:var(--green)}.stat-val.warn{color:var(--orange)}.stat-val.bad{color:var(--red)}
 .stat-sub{font-size:9px;color:#ccc;margin-top:1px}
-
+ 
 /* ── SECTION ─────────────────────────── */
 .section{margin:0 14px 10px;background:var(--white);border-radius:var(--radius);box-shadow:0 2px 8px rgba(0,0,0,.05);overflow:hidden}
 .sec-head{padding:11px 14px 8px;font-size:12px;font-weight:700;color:var(--ink);display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
 .sec-head .sec-act{font-size:11px;font-weight:700;color:var(--blue);background:none;border:none;cursor:pointer}
-
+ 
 /* ── BUFFER ─────────────────────────── */
 .buf-wrap{padding:11px 14px}
 .buf-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
@@ -113,7 +116,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 .deduct-row{display:flex;justify-content:space-between;font-size:10px;padding:2px 0;color:#555}
 .deduct-row .neg{font-weight:700;color:var(--red)}
 .deduct-total{display:flex;justify-content:space-between;font-size:12px;font-weight:900;padding:7px 0 0;border-top:1px solid var(--border);margin-top:4px}
-
+ 
 /* ── LOG ────────────────────────────── */
 .log-list{padding:0 14px}
 .log-item{display:flex;align-items:flex-start;gap:9px;padding:8px 0;border-bottom:1px solid var(--border)}
@@ -126,7 +129,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 .badge.ok{background:var(--green-lt);color:var(--green)}.badge.flex{background:var(--blue-lt);color:var(--blue)}
 .badge.buf{background:var(--orange-lt);color:var(--orange)}.badge.bad{background:var(--red-lt);color:var(--red)}
 .log-time{font-size:11px;font-weight:700;color:#999;white-space:nowrap}
-
+ 
 /* ── FORMS ──────────────────────────── */
 .form-pad{padding:12px 14px}
 .f-lbl{font-size:11px;color:#888;margin-bottom:3px;display:block;font-weight:600}
@@ -138,7 +141,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 .f-grp{padding:0 14px 8px}
 .slide-in{animation:slideIn .2s ease}
 @keyframes slideIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
-
+ 
 /* ── LEAVE ──────────────────────────── */
 .leave-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:11px 14px}
 .leave-card{background:var(--white);border:1.5px solid var(--border);border-radius:12px;padding:11px;text-align:center;cursor:pointer;transition:border-color .2s,transform .12s}
@@ -154,7 +157,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 .lr-actions{display:flex;gap:5px;margin-top:6px}
 .lr-btn{flex:1;padding:5px;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer}
 .lr-btn.approve{background:var(--green-lt);color:var(--green)}.lr-btn.reject{background:var(--red-lt);color:var(--red)}.lr-btn.del{background:var(--red-lt);color:var(--red)}
-
+ 
 /* ── SCHEDULE ───────────────────────── */
 .sched-week{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;padding:11px 14px}
 .sw-day{border-radius:8px;padding:5px 2px;text-align:center;font-size:10px;cursor:pointer;border:1px solid var(--border)}
@@ -165,7 +168,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 .shift-opt.sel{border-color:var(--gold);background:var(--gold-lt)}
 .so-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
 .so-name{font-size:13px;font-weight:700}.so-time{font-size:10px;color:#888;margin-top:1px}
-
+ 
 /* ── EXPENSE ────────────────────────── */
 .photo-upload{border:2px dashed var(--border);border-radius:11px;padding:16px;text-align:center;cursor:pointer;transition:border-color .2s;margin-bottom:7px;position:relative}
 .photo-upload:hover,.photo-upload.has-photo{border-color:var(--green);background:var(--green-lt)}
@@ -196,7 +199,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 .sum-lbl{font-size:10px;color:#aaa;margin-bottom:3px}.sum-val{font-size:20px;font-weight:900}
 .sum-card.gold .sum-val{color:var(--gold)}.sum-card.orange .sum-val{color:var(--orange)}
 .sum-card.green .sum-val{color:var(--green)}.sum-card.teal .sum-val{color:var(--teal)}
-
+ 
 /* ── EMPLOYEE ───────────────────────── */
 .emp-card{background:var(--white);border-radius:12px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px;box-shadow:0 2px 6px rgba(0,0,0,.05)}
 .emp-av{width:40px;height:40px;border-radius:50%;font-size:16px;font-weight:900;display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -206,7 +209,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 .emp-btns{display:flex;gap:5px;margin-top:7px;flex-wrap:wrap}
 .emp-btn{padding:5px 9px;border:none;border-radius:7px;font-size:10px;font-weight:700;cursor:pointer}
 .emp-btn.salary{background:var(--gold-lt);color:var(--orange)}.emp-btn.disable{background:var(--red-lt);color:var(--red)}.emp-btn.enable{background:var(--green-lt);color:var(--green)}
-
+ 
 /* ── SALARY ─────────────────────────── */
 .sal-hero{background:linear-gradient(160deg,var(--dark),#1A1A32);margin:14px;border-radius:var(--radius);padding:18px;color:var(--white);text-align:center}
 .sal-av{width:56px;height:56px;border-radius:50%;margin:0 auto 9px;font-size:21px;font-weight:900;display:flex;align-items:center;justify-content:center}
@@ -219,26 +222,26 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 .comp-item:last-child{border-bottom:none}
 .comp-warn{font-size:10px;color:var(--orange);font-weight:700;margin-top:2px}
 .locked-msg{display:flex;align-items:center;gap:6px;padding:10px 14px;font-size:11px;color:#aaa;background:var(--mist);margin:0 14px 10px;border-radius:10px}
-
+ 
 /* ── MODAL ──────────────────────────── */
 .modal-overlay{position:fixed;inset:0;background:#00000077;z-index:100;display:none;align-items:flex-end}
 .modal-overlay.show{display:flex}
 .modal-box{background:var(--white);border-radius:20px 20px 0 0;padding:20px 16px;width:100%;max-width:430px;margin:0 auto;max-height:88vh;overflow-y:auto}
 .modal-title{font-size:15px;font-weight:900;color:var(--ink);margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
 .modal-close{background:var(--mist);border:none;border-radius:50%;width:28px;height:28px;font-size:13px;cursor:pointer}
-
+ 
 /* ── LIGHTBOX ───────────────────────── */
 .lightbox{position:fixed;inset:0;background:#000000dd;z-index:200;display:none;align-items:center;justify-content:center}
 .lightbox.show{display:flex}
 .lightbox img{max-width:90%;max-height:80vh;border-radius:12px}
 .lb-close{position:absolute;top:20px;right:20px;background:#ffffff22;border:none;color:var(--white);font-size:18px;width:34px;height:34px;border-radius:50%;cursor:pointer}
-
-
+ 
+ 
 /* ── TOAST ──────────────────────────── */
 #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--ink);color:var(--white);padding:8px 16px;border-radius:26px;font-size:12px;font-weight:600;white-space:nowrap;z-index:999;transition:transform .3s cubic-bezier(.34,1.56,.64,1);pointer-events:none}
 #toast.show{transform:translateX(-50%) translateY(0)}
 #toast.ok{background:var(--green)}#toast.warn{background:var(--orange)}#toast.err{background:var(--red)}
-
+ 
 /* ── NAV ────────────────────────────── */
 .bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:var(--white);border-top:1px solid var(--border);display:flex;padding-bottom:env(safe-area-inset-bottom,6px);z-index:50}
 .nav-btn{flex:1;padding:9px 0 6px;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:none;cursor:pointer;font-size:11.5px;color:#bbb;font-weight:700;transition:color .2s}
@@ -252,7 +255,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 </head>
 <body>
 <div id="app">
-
+ 
 <!-- HEADER -->
 <header>
   <div class="hdr-row">
@@ -273,7 +276,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
     <div class="u-badge" id="uBadge" style="background:var(--gold);color:var(--dark)">老闆</div>
   </div>
 </header>
-
+ 
 <!-- ════ PAGE: 打卡 ════ -->
 <div class="page active" id="page-home">
   <div class="clock-hero">
@@ -305,12 +308,12 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
       </button>
     </div>
   </div>
-
+ 
   <div class="status-row" style="grid-template-columns:1fr 1fr">
     <div class="stat-card"><div class="stat-lbl">上班打卡</div><div class="stat-val" id="sIn">--:--</div><div class="stat-sub" id="sInNote"></div></div>
     <div class="stat-card"><div class="stat-lbl">下班打卡</div><div class="stat-val" id="sOut">--:--</div><div class="stat-sub" id="sOutNote"></div></div>
   </div>
-
+ 
   <!-- 月緩衝 -->
   <div class="section">
     <div class="sec-head">⏱️ 本月緩衝額度 <span id="bufMonth"></span></div>
@@ -328,13 +331,13 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
       </div>
     </div>
   </div>
-
+ 
   <!-- 打卡紀錄 -->
   <div class="section">
     <div class="sec-head">📋 今日打卡紀錄</div>
     <div class="log-list" id="logList"><div class="empty">尚無打卡紀錄</div></div>
   </div>
-
+ 
   <!-- 補卡 -->
   <div class="section">
     <div class="sec-head">✏️ 補卡申請</div>
@@ -356,14 +359,14 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
       <button class="btn-sub purple" onclick="submitMakeup()">送出補卡申請 →</button>
     </div>
   </div>
-
+ 
   <!-- 補卡紀錄與審核（缺漏補上） -->
   <div class="section">
     <div class="sec-head">🕐 補卡申請紀錄</div>
     <div class="log-list" id="mkList"><div class="empty">尚無補卡申請</div></div>
   </div>
 </div>
-
+ 
 <!-- ════ PAGE: 排班 ════ -->
 <div class="page" id="page-schedule">
   <div class="pg-title">本週排班</div>
@@ -375,7 +378,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
     <div style="padding:12px 14px" id="shiftEditor"></div>
   </div>
 </div>
-
+ 
 <!-- ════ PAGE: 請假 ════ -->
 <div class="page" id="page-leave">
   <div class="pg-title">申請請假 <button onclick="reloadLeaves()" style="font-size:11px;padding:4px 10px;border:none;border-radius:8px;background:var(--blue);color:white;cursor:pointer;float:right;margin-top:2px">🔄 重新載入</button></div>
@@ -425,12 +428,12 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
   <div style="padding:0 14px 6px;font-size:12px;font-weight:700;color:var(--ink)">請假紀錄</div>
   <div style="padding:0 14px" id="leaveRecs"><div class="empty">尚無請假紀錄</div></div>
 </div>
-
+ 
 <!-- ════ PAGE: 加班申請 ════ -->
 <div class="page" id="page-overtime">
   <div class="pg-title">加班申請</div>
   <div class="pg-sub">僅限主管指示的加班才可申請</div>
-
+ 
   <div class="section">
     <div class="form-pad">
       <div class="banner warn" style="margin-bottom:10px">
@@ -473,20 +476,20 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
       <button class="btn-sub gold" onclick="submitOvertime()">送出加班申請 →</button>
     </div>
   </div>
-
+ 
   <!-- 我的加班紀錄 -->
   <div class="section">
     <div class="sec-head">我的加班紀錄</div>
     <div id="myOtList"><div class="empty">尚無加班紀錄</div></div>
   </div>
-
+ 
   <!-- 老闆/行政：全員加班申請 -->
   <div class="section" id="allOtSection" style="display:none">
     <div class="sec-head">📋 待審核加班申請</div>
     <div id="allOtList"><div class="empty">無待審核</div></div>
   </div>
 </div>
-
+ 
 <!-- ════ PAGE: 代墊款 ════ -->
 <div class="page" id="page-expense">
   <div class="pg-title">代墊款申請</div>
@@ -557,7 +560,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
     <div id="myExpList"><div class="empty">尚無申請紀錄</div></div>
   </div>
 </div>
-
+ 
 <!-- ════ PAGE: 員工 ════ -->
 <div class="page" id="page-employees">
   <div class="pg-title">員工管理</div>
@@ -573,7 +576,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
     <div id="suspList" style="margin-top:10px"></div>
   </div>
 </div>
-
+ 
 <!-- ════ PAGE: 薪資 ════ -->
 <div class="page" id="page-checkin">
   <div class="pg-title">出勤紀錄</div>
@@ -591,7 +594,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
   </div>
   <div id="ckContent"></div>
 </div>
-
+ 
 <div class="page" id="page-salary">
   <div class="sal-hero">
     <div class="sal-av" id="salAv" style="background:var(--gold);color:var(--dark)">E</div>
@@ -612,7 +615,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
   </div>
   <div id="salContent"></div>
 </div>
-
+ 
 <!-- NAV -->
 <nav class="bottom-nav">
   <button class="nav-btn active" id="nav-home"      onclick="switchPage('home')">     <span class="nav-icon">🏠</span>打卡</button>
@@ -625,7 +628,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
   <button class="nav-btn"        id="nav-salary"    onclick="switchPage('salary')">   <span class="nav-icon" id="salNavIcon">📊</span><span id="salNavLabel">出勤</span></button>
 </nav>
 </div>
-
+ 
 <!-- 新增員工 Modal -->
 <div class="modal-overlay" id="addEmpModal">
   <div class="modal-box">
@@ -654,7 +657,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
     <button class="btn-sub green" onclick="addEmployee()">建立員工資料 →</button>
   </div>
 </div>
-
+ 
 <!-- 薪資設定 Modal -->
 <div class="modal-overlay" id="salaryModal">
   <div class="modal-box">
@@ -666,14 +669,14 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
     <button class="btn-sub gold" onclick="saveSalary()">儲存薪資設定</button>
   </div>
 </div>
-
+ 
 <!-- Lightbox -->
 <div class="lightbox" id="lightbox" onclick="closeLightbox()">
   <img id="lbImg"/><button class="lb-close">✕</button>
 </div>
-
+ 
 <div id="toast"></div>
-
+ 
 <script>
 /* ════════════════════════════════════════
    四層權限
@@ -696,7 +699,7 @@ const ROLES = {
     canAddEmp:false, canDisableEmp:false, canViewAll:false,
     canViewSalary:false, canEditSalary:false, canViewExp:false, canApproveExp:false, canMarkPaid:false },
 };
-
+ 
 /* ════════════════════════════════════════
    班別
 ════════════════════════════════════════ */
@@ -704,7 +707,7 @@ const SHIFTS = {
   standard:{ key:'standard',name:'標準班',emoji:'🏢',color:'var(--green)',bgCls:'standard',startH:9, startM:0, totalMins:540,flexMins:30,cross:false,note:'09:00 → 18:00'},
   custom:  { key:'custom',  name:'自訂班',emoji:'⚙️',color:'var(--teal)', bgCls:'custom', startH:null,startM:null,totalMins:540,flexMins:30,cross:false,note:'主管自訂'},
 };
-
+ 
 /* ════════════════════════════════════════
    假別
 ════════════════════════════════════════ */
@@ -718,7 +721,7 @@ const LEAVE_TYPES = [
   // {key:'funeral',name:'喪假',emoji:'🕯️',note:'全薪',requireProof:true,yearLimit:8,monthlyCap:null},
   // {key:'marriage',name:'婚假',emoji:'💍',note:'全薪',requireProof:true,yearLimit:8,monthlyCap:null},
 ];
-
+ 
 /* ════════════════════════════════════════
    代墊分類
 ════════════════════════════════════════ */
@@ -735,14 +738,14 @@ const CASES = [
   {id:'admin',    name:'📋 行政',     color:'var(--orange)'},
   {id:'custom',   name:'✏️ 其他',     color:'#888'},
 ];
-
-
+ 
+ 
 /* ════════════════════════════════════════
    Supabase REST API 直接呼叫
 ════════════════════════════════════════ */
 const SB_URL = 'https://mfibmcabhhtcxxursfyl.supabase.co';
 const SB_KEY = 'sb_publishable_NkeAxHb5yuS1FbJ-gxOg8g_2qqaVbOs';
-
+ 
 async function sbGet(table, params) {
   const url = new URL(`${SB_URL}/rest/v1/${table}`);
   if(params) Object.entries(params).forEach(([k,v]) => url.searchParams.set(k,v));
@@ -755,7 +758,7 @@ async function sbGet(table, params) {
   });
   return await res.json();
 }
-
+ 
 async function sbPost(table, data) {
   const res = await fetch(`${SB_URL}/rest/v1/${table}`, {
     method: 'POST',
@@ -770,7 +773,7 @@ async function sbPost(table, data) {
   const result = await res.json();
   return Array.isArray(result) ? result[0] : result;
 }
-
+ 
 async function sbPatch(table, id, data) {
   const res = await fetch(`${SB_URL}/rest/v1/${table}?id=eq.${id}`, {
     method: 'PATCH',
@@ -785,19 +788,19 @@ async function sbPatch(table, id, data) {
   const result = await res.json();
   return Array.isArray(result) ? result[0] : result;
 }
-
+ 
 /* ════════════════════════════════════════
    API 設定（Render 後端，僅用於 LINE 通知）
 ════════════════════════════════════════ */
 const API_BASE = 'https://noble-hr-api.onrender.com';
-
+ 
 async function sendLineMsg(msg){
   try{
     // 透過後端發送，Token 不暴露在前端
     await api('POST', '/api/notify', { message: msg });
   }catch(e){console.log('LINE 通知',e);}
 }
-
+ 
 // 通用 API 呼叫
 async function api(method, path, body) {
   try {
@@ -812,7 +815,7 @@ async function api(method, path, body) {
     return null;
   }
 }
-
+ 
 // 從 API 載入員工資料
 async function loadEmployees() {
   try {
@@ -837,7 +840,7 @@ async function loadEmployees() {
     console.error('loadEmployees 錯誤：', e);
   }
 }
-
+ 
 // 打卡存到 API
 async function loadAllCheckins(){
   try{
@@ -889,7 +892,7 @@ async function saveCheckin(empId, type, lat, lng, officeId, shiftKey) {
     return null;
   }
 }
-
+ 
 // 請假存到 API
 async function saveLeave(empId, leaveType, startDate, endDate, reason, requireProof, dayPart, customHours, proofPhoto) {
   try{
@@ -907,7 +910,7 @@ async function saveLeave(empId, leaveType, startDate, endDate, reason, requirePr
     return null;
   }
 }
-
+ 
 async function loadLeaves(empId) {
   try {
     const params = {'order': 'created_at.desc'};
@@ -937,7 +940,7 @@ async function loadLeaves(empId) {
     console.error('loadLeaves 錯誤：', e);
   }
 }
-
+ 
 async function saveExpense(expData) {
   try{
     return await sbPost('expenses', expData);
@@ -946,7 +949,7 @@ async function saveExpense(expData) {
     return null;
   }
 }
-
+ 
 async function loadExpenses(empId) {
   try{
     const params = {'order': 'created_at.desc'};
@@ -967,17 +970,17 @@ async function loadExpenses(empId) {
     console.error('loadExpenses 錯誤：', e);
   }
 }
-
+ 
 async function saveEmployee(empData) {
   try{ return await sbPost('employees', empData); }
   catch(e){ console.error('saveEmployee 錯誤：', e); return null; }
 }
-
+ 
 async function updateEmployee(id, updateData) {
   try{ return await sbPatch('employees', id, updateData); }
   catch(e){ console.error('updateEmployee 錯誤：', e); return null; }
 }
-
+ 
 async function loadOvertimes(){
   try{
     const data = await api('GET','/api/overtimes');
@@ -992,7 +995,7 @@ async function loadOvertimes(){
     }
   }catch(e){ console.error('loadOvertimes 錯誤：', e); }
 }
-
+ 
 async function loadHolidays(){
   try{
     const data = await sbGet('holidays', {'order':'date.asc'});
@@ -1043,7 +1046,7 @@ async function addSuspensionDay(){
     } else toast('儲存失敗，請重試','err');
   }catch(e){ toast('儲存失敗，請重試','err'); }
 }
-
+ 
 /* ════════════════════════════════════════
    State
 ════════════════════════════════════════ */
@@ -1068,7 +1071,7 @@ const S = {
   holidays:{},
   currentExpMonth: new Date().toISOString().slice(0,7),
 };
-
+ 
 /* ════════════════════════════════════════
    角色切換
 ════════════════════════════════════════ */
@@ -1110,7 +1113,7 @@ function setRole(r){
   updateMkEmpSelect(); updateMkShiftSelect();
   toast(`已切換：${role.label}`,'ok');
 }
-
+ 
 /* ════════════════════════════════════════
    班別
 ════════════════════════════════════════ */
@@ -1133,7 +1136,7 @@ function renderShiftCard(ds){
   
   $('scEditBtn').style.display=ROLES[S.role].canEditSchedule?'block':'none';
 }
-
+ 
 /* ════════════════════════════════════════
    遲到計算核心
    規則：
@@ -1162,7 +1165,7 @@ function calcLate(t,sh){
   const penalty=overMins*3;
   return{status:overMins>0?'late':'buf',lateMins,flexMins:0,usedBuf,overMins,penalty,minOut};
 }
-
+ 
 /* ════════════════════════════════════════
    時鐘
 ════════════════════════════════════════ */
@@ -1176,7 +1179,7 @@ function tick(){
   if(!S.clockedIn&&!S.inTime)updateBannerLive(n);
 }
 tick();setInterval(tick,1000);
-
+ 
 function updateBannerLive(n){
   const sh=getShift(); const b=$('lateBanner');
   const nowM=n.getHours()*60+n.getMinutes();
@@ -1192,7 +1195,7 @@ function updateBannerLive(n){
     else{b.className='banner over';b.textContent=`🔴 遲到 ${late} 分｜緩衝已耗盡，超出 ${over} 分`;}
   }
 }
-
+ 
 /* ════════════════════════════════════════
    GPS
 ════════════════════════════════════════ */
@@ -1249,7 +1252,7 @@ function enableBtn(){
   if(S.pendingMakeupConflictType==='in')  bIn.disabled=true;
   if(S.pendingMakeupConflictType==='out') bOut.disabled=true;
 }
-
+ 
 // 核心修復：每次開啟系統都向資料庫核對「今天實際打卡狀態」，
 // 不再只依賴記憶體變數（記憶體變數在重新整理/關閉重開後會歸零，導致誤判成「還沒上班」）
 async function syncTodayClockStatus(){
@@ -1284,7 +1287,7 @@ async function syncTodayClockStatus(){
     await checkPendingMakeupConflict();
   }catch(e){ console.error('syncTodayClockStatus 錯誤：', e); }
 }
-
+ 
 // 保護機制：若今天已有一筆「待審核」的補卡申請，跟按鈕即將記錄的類型相同，
 // 就擋下打卡並提示，避免核准前又手動打一次卡，產生重複/衝突的紀錄
 async function checkPendingMakeupConflict(){
@@ -1315,7 +1318,7 @@ async function checkPendingMakeupConflict(){
     }
   }catch(e){ console.error('checkPendingMakeupConflict 錯誤：', e); }
 }
-
+ 
 // 核心修復：本月緩衝額度改為向資料庫核對「這個月實際遲到總分鐘數」，
 // 不再只靠記憶體變數（記憶體變數在重新整理/關閉重開後會歸零，導致誤以為緩衝從沒用過）
 async function syncMonthlyBuffer(){
@@ -1354,7 +1357,7 @@ async function syncMonthlyBuffer(){
     if($('bufDetail')) renderBuffer();
   }catch(e){ console.error('syncMonthlyBuffer 錯誤：', e); }
 }
-
+ 
 /* ════════════════════════════════════════
    打卡
 ════════════════════════════════════════ */
@@ -1395,7 +1398,7 @@ async function doClockAction(type){
   enableBtn(); // 依最新狀態重新開關兩顆按鈕
   setTimeout(getGPS,400);
 }
-
+ 
 /* ════════════════════════════════════════
    月緩衝（員工看遲到分鐘，不看金額）
 ════════════════════════════════════════ */
@@ -1422,7 +1425,7 @@ function renderBuffer(){
   $('deductTotal').style.display=canSeeMoney?'flex':'none';
   $('deductAmt').textContent=`-NT$${total}`;
 }
-
+ 
 /* ════════════════════════════════════════
    打卡紀錄
 ════════════════════════════════════════ */
@@ -1446,7 +1449,7 @@ function addLog(type,action,loc,time,c,sh){
     </div>`;
   }).join('');
 }
-
+ 
 /* ════════════════════════════════════════
    補卡
 ════════════════════════════════════════ */
@@ -1549,7 +1552,7 @@ async function submitMakeup(){
     toast('送出失敗，請重試','err');
   }
 }
-
+ 
 /* ════════════════════════════════════════
    排班
 ════════════════════════════════════════ */
@@ -1600,7 +1603,7 @@ function saveShift(ds){
   $('shiftEditorSec').style.display='none';renderScheduleWeek();
   if(ds===today())renderShiftCard(ds);
 }
-
+ 
 /* ════════════════════════════════════════
    請假
 ════════════════════════════════════════ */
@@ -1751,7 +1754,7 @@ setInterval(()=>{
     loadLeaves(role.canViewAll ? null : u.empId).then(()=>renderLeaveRecs());
   }
 }, 30000);
-
+ 
 async function reloadLeaves(){
   const role=ROLES[S.role];
   const u=S.users[S.role];
@@ -1760,7 +1763,7 @@ async function reloadLeaves(){
   renderLeaveRecs();
   toast('已更新','ok');
 }
-
+ 
 function renderLeaveRecs(){
   const role=ROLES[S.role];
   const u=S.users[S.role];
@@ -1825,7 +1828,7 @@ async function deleteLeave(id){
     toast('取消失敗','err');
   }
 }
-
+ 
 /* ════════════════════════════════════════
    代墊款
 ════════════════════════════════════════ */
@@ -2010,7 +2013,7 @@ async function undoPaid(id){
   S.expenses=S.expenses.map(e=>e.id===id?Object.assign({},e,{status:'approved',paidAt:null}):e);
   renderExpensePage();toast('↩️ 已撤銷撥款，退回「已核准」','ok');
 }
-
+ 
 /* ════════════════════════════════════════
    員工管理
 ════════════════════════════════════════ */
@@ -2111,7 +2114,7 @@ async function enableEmp(id){
   if(saved){ S.employees=S.employees.map(x=>x.id===id?Object.assign({},x,{status:'active'}):x); renderEmpList(); toast('已重新啟用','ok'); }
   else toast('儲存失敗，請重試','err');
 }
-
+ 
 /* ════════════════════════════════════════
    薪資（員工/行政：看不到金額）
 ════════════════════════════════════════ */
@@ -2121,7 +2124,7 @@ async function enableEmp(id){
 let S_rptMonth = new Date().getMonth();
 let S_rptYear  = new Date().getFullYear();
 let S_rptTab   = 1;
-
+ 
 function changeRptMonth(dir){
   S_rptMonth += dir;
   if(S_rptMonth > 11){ S_rptMonth = 0; S_rptYear++; }
@@ -2136,11 +2139,11 @@ function switchRptTab(n){
   $('rptTab2').style.color      = n===2 ? '#1a1808'     : 'var(--gold)';
   renderSalaryPage();
 }
-
+ 
 function toPlusTaipei(ts){ return new Date(new Date(ts).getTime()+8*3600000); }
 function tDateStr(ts){ const d=toPlusTaipei(ts); return d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0'); }
 function tTimeStr(ts){ const d=toPlusTaipei(ts); return String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0'); }
-
+ 
 function calcMonthlyStats(empId, year, month){
   const ym = year+'-'+String(month+1).padStart(2,'0');
   const logs = (S.allCheckins||S.logs||[]).filter(l=>{
@@ -2185,7 +2188,7 @@ function calcMonthlyStats(empId, year, month){
   });
   return {days,lateDays,totalLateMins,overMins,penalty,totalWorkMins,leaves,expAmt,locations};
 }
-
+ 
 // 全勤名單：整月上班一次都沒晚過（分 9:00 / 9:30 兩個門檻），且當月沒有病假或事假
 // 只計「有出勤紀錄」的員工（整月都在請假、完全沒打卡的人不列入，避免誤判為全勤）
 function getPerfectAttendanceLists(year, month){
@@ -2219,14 +2222,14 @@ function renderPerfectAttendanceHTML(year, month){
   </div>`;
   return row('🌅 全月 09:00 前到班（且無病假/事假）', r.list900) + row('🏆 全月 09:30 前到班（且無病假/事假、補卡不超過2次）', r.list930);
 }
-
+ 
 /* ════════════════════════════════════════
    獨立「出勤」分頁（老闆／會計／行政主管，永不顯示薪資金額）
 ════════════════════════════════════════ */
 let S_ckMonth = new Date().getMonth();
 let S_ckYear  = new Date().getFullYear();
 let S_ckTab   = 1; // 1=遲到總覽 2=請假總覽
-
+ 
 function changeCkMonth(dir){
   S_ckMonth += dir;
   if(S_ckMonth > 11){ S_ckMonth = 0; S_ckYear++; }
@@ -2245,12 +2248,12 @@ function switchCkTab(n){
   $('ckTab4').style.color      = n===4 ? '#1a1808'     : 'var(--gold)';
   renderCheckinPage();
 }
-
+ 
 function renderCheckinPage(){
   $('ckMonthLabel').textContent = S_ckYear+' 年 '+(S_ckMonth+1)+' 月';
   const ym = S_ckYear+'-'+String(S_ckMonth+1).padStart(2,'0');
   const actEmps = S.employees.filter(function(e){return e.status==='active';});
-
+ 
   if(S_ckTab === 1){
     // 遲到總覽
     const lateList=actEmps.map(function(e){const st=calcMonthlyStats(e.id,S_ckYear,S_ckMonth);return {e,lateDays:st.lateDays,totalLateMins:st.totalLateMins};}).filter(function(x){return x.lateDays.length>0;});
@@ -2269,9 +2272,9 @@ function renderCheckinPage(){
       renderPerfectAttendanceHTML(S_ckYear, S_ckMonth) +
       '</div></div>';
   } else if(S_ckTab === 4){
-    // 每日明細（含地點；地圖連結與預覽僅老闆可見）
+    // 每日明細：每人每天都列一行（休息日／國定假日／請假／缺卡／正常），比照 NUEiP 匯出格式
     const isOwner = S.role==='owner';
-    const byEmpDay = {}; // empId -> date -> {inT,inLat,inLng,outT,outLat,outLng}
+    const byEmpDay = {};
     (S.allCheckins||[]).forEach(function(c){
       const d = tDateStr(c.checked_at);
       if(!d.startsWith(ym)) return;
@@ -2283,26 +2286,55 @@ function renderCheckinPage(){
       if(c.type==='out' && (!rec.outT || t>rec.outT)){ rec.outT=t; rec.outLat=c.lat; rec.outLng=c.lng; }
     });
     const DAYS=['日','一','二','三','四','五','六'];
+    const LEAVE_NAME={annual:'特休',sick:'病假',menstrual:'生理假',personal:'事假',comp:'補休',checkup:'產檢假'};
+    const daysInMonth = new Date(S_ckYear, S_ckMonth+1, 0).getDate();
+    const todayStr = today();
     const rows=[];
     actEmps.forEach(function(e){
-      const days = byEmpDay[e.id]||{};
-      Object.keys(days).sort().forEach(function(d){ rows.push({e:e,d:d,v:days[d]}); });
+      for(let d=1; d<=daysInMonth; d++){
+        const ds = S_ckYear+'-'+String(S_ckMonth+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+        if(ds > todayStr) break; // 未來日期不顯示
+        const wd = new Date(ds).getDay();
+        const v = (byEmpDay[e.id]||{})[ds];
+        const leaveToday = S.leaveRecords.find(function(r){ return r.empId===e.id && r.status==='approved' && r.start<=ds && r.end>=ds; });
+        const holiday = S.holidays && S.holidays[ds];
+        let status='', statusColor='#333', late=0;
+        if(leaveToday){
+          const p=leaveToday.dayPart==='am'?'上半天':leaveToday.dayPart==='pm'?'下半天':leaveToday.dayPart==='custom'?leaveToday.customHours+'小時':'全天';
+          status=(leaveToday.emoji||'')+(LEAVE_NAME[leaveToday.type]||leaveToday.type)+'（'+p+'）'; statusColor='var(--teal)';
+        } else if(holiday){
+          status=(holiday.type==='suspension'?'📢 停班：':'🎉 ')+holiday.name; statusColor='#999';
+        } else if(wd===0||wd===6){
+          if(v&&v.inT){ status='假日出勤'; statusColor='var(--purple)'; }
+          else { status='休息日'; statusColor='#bbb'; }
+        } else if(v&&v.inT&&v.outT){
+          status='正常'; statusColor='var(--green)';
+          if(v.inT>'09:30'){ const gp=[9,30],tp=v.inT.split(':').map(Number); late=(tp[0]*60+tp[1])-(gp[0]*60+gp[1]); status='遲到'; statusColor='var(--red)'; }
+        } else if(v&&v.inT&&!v.outT){
+          status='缺卡（未打下班）'; statusColor='var(--orange)';
+          if(v.inT>'09:30'){ const gp=[9,30],tp=v.inT.split(':').map(Number); late=(tp[0]*60+tp[1])-(gp[0]*60+gp[1]); }
+        } else {
+          status='缺卡'; statusColor='var(--orange)';
+        }
+        rows.push({e:e,d:ds,wd:wd,v:v||{},status:status,statusColor:statusColor,late:late});
+      }
     });
-    rows.sort(function(a,b){ return a.d===b.d ? a.e.name.localeCompare(b.e.name) : a.d.localeCompare(b.d); });
     const mapIcon=(lat,lng,label)=> (isOwner&&lat&&lng) ? ` <span onclick="showMapModal(${lat},${lng},'${label}')" style="cursor:pointer">📍</span>`:'';
     const tableRows=rows.map(function(r){
-      const wd=DAYS[new Date(r.d).getDay()];
       return '<tr style="border-bottom:1px solid var(--rule)">'+
-        '<td style="padding:7px 4px;font-size:12px;color:#999">'+r.d.slice(5)+'('+wd+')</td>'+
-        '<td style="padding:7px 4px;font-weight:700;font-size:12px">'+r.e.name+'</td>'+
+        '<td style="padding:7px 4px;font-size:11px;color:#999;white-space:nowrap">'+r.d.slice(5)+'('+DAYS[r.wd]+')</td>'+
+        '<td style="padding:7px 4px;font-weight:700;font-size:12px;white-space:nowrap">'+r.e.name+'</td>'+
+        '<td style="padding:7px 4px;font-size:11px;color:#999">'+(r.e.role||'')+'</td>'+
         '<td style="padding:7px 4px;text-align:center;font-size:12px">'+(r.v.inT||'-')+mapIcon(r.v.inLat,r.v.inLng,r.e.name+' 上班 '+r.d)+'</td>'+
-        '<td style="padding:7px 4px;text-align:center;font-size:12px">'+(r.v.outT||'-')+mapIcon(r.v.outLat,r.v.outLng,r.e.name+' 下班 '+r.d)+'</td></tr>';
+        '<td style="padding:7px 4px;text-align:center;font-size:12px">'+(r.v.outT||'-')+mapIcon(r.v.outLat,r.v.outLng,r.e.name+' 下班 '+r.d)+'</td>'+
+        '<td style="padding:7px 4px;text-align:center;font-size:11px;color:'+(r.late>0?'var(--red)':'#ccc')+'">'+(r.late>0?r.late+'分':'-')+'</td>'+
+        '<td style="padding:7px 4px;text-align:center;font-size:11px;font-weight:700;color:'+r.statusColor+'">'+r.status+'</td></tr>';
     }).join('');
     $('ckContent').innerHTML =
       '<div class="section"><div class="sec-head">📅 每日打卡明細'+(isOwner?'（點 📍 看地圖）':'')+'</div>'+
-      '<div style="overflow-x:auto;padding:4px 14px"><table style="width:100%;border-collapse:collapse">'+
-      '<tr style="color:#aaa;font-size:11px;border-bottom:2px solid var(--gold)"><th style="padding:6px 4px;text-align:left">日期</th><th style="padding:6px 4px;text-align:left">員工</th><th style="padding:6px 4px">上班</th><th style="padding:6px 4px">下班</th></tr>'+
-      (tableRows||'<tr><td colspan="4" style="padding:14px;color:#bbb;text-align:center">本月尚無打卡紀錄</td></tr>')+
+      '<div style="overflow-x:auto;padding:4px 14px"><table style="width:100%;border-collapse:collapse;min-width:560px">'+
+      '<tr style="color:#aaa;font-size:11px;border-bottom:2px solid var(--gold)"><th style="padding:6px 4px;text-align:left">日期</th><th style="padding:6px 4px;text-align:left">員工</th><th style="padding:6px 4px;text-align:left">職稱</th><th style="padding:6px 4px">上班</th><th style="padding:6px 4px">下班</th><th style="padding:6px 4px">遲到</th><th style="padding:6px 4px">狀態</th></tr>'+
+      (tableRows||'<tr><td colspan="7" style="padding:14px;color:#bbb;text-align:center">本月尚無資料</td></tr>')+
       '</table></div></div>';
   } else {
     // 請假總覽
@@ -2317,7 +2349,7 @@ function renderCheckinPage(){
       (noLeaveList.length?noLeaveList.map(function(x){return x.e.name;}).join('　'):'-')+'</div></div>';
   }
 }
-
+ 
 function renderSalaryPage(){
   const role=ROLES[S.role]; const u=S.users[S.role];
   const myEmp=S.employees.find(e=>e.id===u.empId)||S.employees[0];
@@ -2332,7 +2364,7 @@ function renderSalaryPage(){
   if(S_rptTab===1) renderMyReport(myEmp,role,u);
   else renderAllReport(role);
 }
-
+ 
 function renderMyReport(myEmp,role,u){
   const fmt=function(n){return 'NT$'+n.toLocaleString();};
   const st=calcMonthlyStats(u.empId,S_rptYear,S_rptMonth);
@@ -2376,7 +2408,7 @@ function renderMyReport(myEmp,role,u){
     myExps.map(function(e){return '<div class="comp-item"><div><div style="font-weight:700">'+e.catName+'</div><div style="font-size:11px;color:#999">'+e.date+'・'+e.caseName+'</div></div><div style="font-weight:900;color:var(--teal)">NT$'+e.amount.toLocaleString()+'</div></div>';}).join('')+
     '<div class="comp-item" style="border-top:1.5px solid var(--gold);margin-top:6px;padding-top:6px"><span style="font-weight:900">合計</span><span style="font-weight:900;color:var(--teal)">'+fmt(st.expAmt)+'</span></div></div></div>':'');
 }
-
+ 
 function renderAllReport(role){
   const fmt=function(n){return 'NT$'+n.toLocaleString();};
   const ym=S_rptYear+'-'+String(S_rptMonth+1).padStart(2,'0');
@@ -2451,7 +2483,7 @@ function renderAllReport(role){
     (locHtml?'<div class="section"><div class="sec-head">📍 外勤打卡地點明細</div><div style="padding:6px 14px">'+locHtml+'</div></div>':'')+
     '<div class="section"><div class="sec-head">🏆 全勤名單</div><div style="padding:10px 14px">'+renderPerfectAttendanceHTML(S_rptYear,S_rptMonth)+'</div></div>';
 }
-
+ 
 function openSalaryModal(empId){
   if(!ROLES[S.role].canEditSalary){toast('無權限','err');return;}
   const emp=S.employees.find(e=>e.id===empId);
@@ -2472,7 +2504,7 @@ function saveSalary(){
     }
   });
 }
-
+ 
 /* ════════════════════════════════════════
    Modal / Lightbox
 ════════════════════════════════════════ */
@@ -2480,7 +2512,7 @@ function openModal(id){$(id).classList.add('show');}
 function closeModal(id){$(id).classList.remove('show');}
 function openLightbox(url){if(!url){toast('此筆無附照片','warn');return;}$('lbImg').src=url;$('lightbox').classList.add('show');}
 function closeLightbox(){$('lightbox').classList.remove('show');}
-
+ 
 /* ════════════════════════════════════════
    加班申請
 ════════════════════════════════════════ */
@@ -2489,54 +2521,54 @@ function toggleOtCaseInput(){
   $('otCaseCustomRow').style.display=isCustom?'block':'none';
   if(!isCustom)$('otCaseName').value='';
 }
-
+ 
 function submitOvertime(){
   const date=$('otDate').value, hours=parseFloat($('otHours').value),
         start=$('otStart').value, end=$('otEnd').value,
         caseId=$('otCase').value, reason=$('otReason').value.trim();
   const customCase=$('otCaseName').value.trim();
-
+ 
   if(!date){toast('請填加班日期','err');return;}
   if(!hours||hours<=0){toast('請填加班時數','err');return;}
   if(caseId==='custom'&&!customCase){toast('請填案場名稱','err');return;}
   if(!reason){toast('請填加班說明','err');return;}
-
+ 
   const u=S.users[S.role];
   const CASES_MAP={daily:'🏢 公司日常',interior:'🛋️ 室內設計',graphic:'🎨 平面設計',visual:'👁️ 視覺設計',custom:'✏️ 其他'};
   const siteName=caseId==='custom'?customCase:CASES_MAP[caseId];
-
+ 
   const newOt={
     id:Date.now(), empId:u.empId, empName:u.name,
     date, siteName, startTime:start, endTime:end,
     hours, reason, status:'pending', createdAt:today()
   };
   S.overtimes.unshift(newOt);
-
+ 
   // 存到後端
   api('POST','/api/overtimes',{
     emp_id:u.empId, emp_name:u.name, date,
     site_name:siteName, start_time:start, end_time:end,
     hours, reason
   });
-
+ 
   // 清空表單
   $('otDate').value=today();$('otHours').value='';
   $('otStart').value='';$('otEnd').value='';
   $('otReason').value='';$('otCase').value='daily';
   $('otCaseCustomRow').style.display='none';
-
+ 
   toast('✅ 加班申請已送出，等待主管批准','ok');
   // 直接發 LINE 通知
   sendLineMsg(`⏰ 加班申請通知\n\n員工：${u.name}\n日期：${date}\n案場：${siteName}\n時數：${hours} 小時${start?'\n時間：'+start+'～'+end:''}\n說明：${reason}\n\n請至系統審核 👉\nhttps://liff.line.me/2010371976-U8wLomXx`);
   renderOvertimePage();
 }
-
+ 
 function renderOvertimePage(){
   const role=ROLES[S.role]; const u=S.users[S.role];
   const mine=S.overtimes.filter(o=>o.empId===u.empId);
   const stMap={pending:'等待主管批准',approved:'✅ 已核准',rejected:'❌ 已拒絕'};
   const stCls={pending:'pending',approved:'approved',rejected:'rejected'};
-
+ 
   // 我的加班紀錄
   $('myOtList').innerHTML=mine.length?mine.map(o=>`
     <div style="padding:11px 14px;border-bottom:1px solid var(--border)">
@@ -2549,7 +2581,7 @@ function renderOvertimePage(){
         <span class="exp-status ${stCls[o.status]}" style="white-space:nowrap;margin-left:8px">${stMap[o.status]}</span>
       </div>
     </div>`).join(''):'<div class="empty">尚無加班紀錄</div>';
-
+ 
   // 老闆/行政：顯示待審核
   if(role.canApproveLeave||role.canAdminReview){
     $('allOtSection').style.display='block';
@@ -2573,7 +2605,7 @@ function renderOvertimePage(){
     $('allOtSection').style.display='none';
   }
 }
-
+ 
 function approveOt(id){
   if(!ROLES[S.role].canApproveLeave){toast('只有老闆可核准','err');return;}
   S.overtimes=S.overtimes.map(o=>o.id===id?Object.assign({},o,{status:'approved'}):o);
@@ -2585,7 +2617,7 @@ function rejectOt(id){
   api('PATCH','/api/overtimes/'+id,{status:'rejected'});
   renderOvertimePage();toast('已拒絕','warn');
 }
-
+ 
 /* ════════════════════════════════════════
    NAV & UTILS
 ════════════════════════════════════════ */
@@ -2617,11 +2649,11 @@ function toast(msg,type='ok'){const el=$('toast');el.textContent=msg;el.classNam
 function $(id){return document.getElementById(id)}
 function pad(n){return String(n||0).padStart(2,'0')}
 function today(){return new Date().toISOString().split('T')[0]}
-
+ 
 /* ════════════════════════════════════════
    LINE LIFF
 ════════════════════════════════════════ */
-
+ 
 async function initLIFF(){
   try{
     if(typeof liff === 'undefined'){
@@ -2635,10 +2667,10 @@ async function initLIFF(){
     document.getElementById('roleSw').style.display='none';
     await liff.init({liffId:'2010371976-U8wLomXx'});
     if(!liff.isLoggedIn()){ liff.login(); return; }
-
+ 
     const p = await liff.getProfile();
     const lineUserId = p.userId;
-
+ 
     const matched = S.employees.find(e => e.lineId === lineUserId);
     if(matched){
       const roleMap = {'老闆':'owner','行政主管':'admin','會計':'accounting'};
@@ -2703,7 +2735,7 @@ async function initLIFF(){
     }
   }
 }
-
+ 
 /* ════════════════════════════════════════
    INIT
 ════════════════════════════════════════ */
@@ -2713,7 +2745,7 @@ async function initLIFF(){
   $('bufMonth').textContent=`${new Date().getMonth()+1}月`;
   $('newEmpHire').value=t;
   setTimeout(getGPS,600);
-
+ 
   // 載入員工資料後再初始化 LIFF
   loadEmployees().then(()=>{
     initLIFF();
@@ -2739,3 +2771,6 @@ async function initLIFF(){
 </script>
 </body>
 </html>
+ 
+
+
