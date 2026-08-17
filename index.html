@@ -1,6 +1,6 @@
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-27-G ═══
-     包含: 27-F 基礎 + 真正修復緩衝額度bug(sbGet不支援陣列條件導致查詢失效，改用單一查詢+前端篩選)
+<!-- ═══ NOBLE HR 版本: v2026-07-29-C ═══
+     包含: 29-B 基礎 + 打卡改成固定「上班/下班」兩顆並排按鈕，各自依當日狀態獨立鎖定
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -295,9 +295,15 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
       <div style="font-size:22px">📍</div><span id="mapLabel">等待定位…</span>
       <span class="map-coords" id="mapCoords"></span>
     </div><br>
-    <button class="btn-clock in" id="btnClock" onclick="doClockAction()" disabled>
-      <span id="btnIcon">🟢</span><span id="btnLabel">上班打卡</span>
-    </button>
+    <div id="mkConflictWarn" style="display:none;background:#fff4e0;border:1.5px solid #e6a817;border-radius:12px;padding:12px 14px;margin-bottom:12px;font-size:12.5px;font-weight:700;color:#a15c1a;line-height:1.6"></div>
+    <div style="display:flex;gap:10px">
+      <button class="btn-clock in" id="btnClockIn" onclick="doClockAction('in')" disabled style="flex:1">
+        <span>🟢</span><span>上班打卡</span>
+      </button>
+      <button class="btn-clock out" id="btnClockOut" onclick="doClockAction('out')" disabled style="flex:1">
+        <span>🔴</span><span>下班打卡</span>
+      </button>
+    </div>
   </div>
 
   <div class="status-row" style="grid-template-columns:1fr 1fr">
@@ -576,6 +582,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
     <button id="ckTab1" onclick="switchCkTab(1)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:var(--gold);color:#1a1808;cursor:pointer">🔴 遲到總覽</button>
     <button id="ckTab2" onclick="switchCkTab(2)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">📋 請假總覽</button>
     <button id="ckTab3" onclick="switchCkTab(3)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">🏆 全勤名單</button>
+    <button id="ckTab4" onclick="switchCkTab(4)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">📅 每日明細</button>
   </div>
   <div style="display:flex;align-items:center;gap:8px;margin:0 14px 14px">
     <button onclick="changeCkMonth(-1)" style="border:none;background:var(--mist);border-radius:8px;padding:6px 14px;font-size:18px;cursor:pointer">‹</button>
@@ -843,6 +850,23 @@ async function loadAllCheckins(){
     }
   }catch(e){ console.error('loadAllCheckins 錯誤：', e); }
 }
+function showMapModal(lat,lng,label){
+  if(S.role!=='owner')return; // 僅老闆可查看打卡地點細節
+  const old=document.getElementById('mapModalOverlay'); if(old)old.remove();
+  const ov=document.createElement('div');
+  ov.id='mapModalOverlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;overflow:hidden;max-width:420px;width:100%">
+    <div style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--rule)">
+      <b style="font-size:14px">📍 ${label}</b>
+      <span style="cursor:pointer;font-size:18px;color:#999" onclick="document.getElementById('mapModalOverlay').remove()">✕</span>
+    </div>
+    <iframe src="https://maps.google.com/maps?q=${lat},${lng}&z=17&output=embed" style="width:100%;height:300px;border:none"></iframe>
+    <div style="padding:10px 16px;font-size:12px;color:#888">${lat}, ${lng}　<a href="https://maps.google.com/?q=${lat},${lng}" target="_blank" style="color:var(--teal)">在 Google 地圖開啟</a></div>
+  </div>`;
+  document.body.appendChild(ov);
+}
 function officeLabel(officeId,lat,lng){
   const o = OFFICES.find(x=>x.id===officeId);
   const hq = OFFICES.find(x=>x.lat);
@@ -1033,7 +1057,7 @@ const S = {
   },
   employees:[],
   schedule:{}, customShiftTimes:{},
-  gps:null, clockedIn:false, inTime:null, inDate:null,
+  gps:null, clockedIn:false, inTime:null, inDate:null, pendingMakeupConflictType:null,
   logs:[], makeupRecords:[], leaveRecords:[],
   leaveType:'annual',
   buf:{totalMins:30,usedMins:0,deductions:[]},
@@ -1108,7 +1132,6 @@ function renderShiftCard(ds){
   $('scEmoji').textContent=sh.emoji; $('scName').textContent=sh.name;
   
   $('scEditBtn').style.display=ROLES[S.role].canEditSchedule?'block':'none';
-  if(!S.clockedIn){const btn=$('btnClock');btn.className='btn-clock '+(sh.key==='night'?'night-in':'in');}
 }
 
 /* ════════════════════════════════════════
@@ -1199,7 +1222,7 @@ function getGPS(){
     $('mapLabel').textContent=near?`📍 ${near.o.name}（${d}m）`:'📍 已定位';
     $('mapCoords').textContent=`${la.toFixed(6)}, ${lo.toFixed(6)}  ±${Math.round(ac)}m`;
     if(inRange||hasRemote){setGps('ok',inRange?`已進入 ${near.o.name}`:'遠端辦公','');enableBtn();}
-    else{setGps('fail',`超出範圍 ${d-200}m`,`${d}m`);$('btnClock').disabled=true;}
+    else{setGps('fail',`超出範圍 ${d-200}m`,`${d}m`);$('btnClockIn').disabled=true;$('btnClockOut').disabled=true;}
   },err=>{
     gpsTries++;
     if(err.code!==1&&gpsTries<4){
@@ -1215,9 +1238,16 @@ function getGPS(){
 }
 function setGps(cls,txt,dist){$('gpsBar').className='gps-bar '+cls;$('gpsText').textContent=txt;$('gpsDist').textContent=dist;$('gpsBar').onclick=cls==='fail'?()=>{gpsTries=0;getGPS();}:null;}
 function enableBtn(){
-  const b=$('btnClock'),sh=getShift(); b.disabled=false;
-  if(S.clockedIn){b.className='btn-clock out';$('btnIcon').textContent='🔴';$('btnLabel').textContent='下班打卡';}
-  else{b.className='btn-clock '+(sh.key==='night'?'night-in':'in');$('btnIcon').textContent='🟢';$('btnLabel').textContent='上班打卡';}
+  const bIn=$('btnClockIn'), bOut=$('btnClockOut');
+  if(!bIn || !bOut) return;
+  // 上班打卡：今天已打過上班（clockedIn 或已有 sIn 時間）就鎖住，防止重複
+  const alreadyIn = S.clockedIn || !!S.inTime;
+  bIn.disabled = alreadyIn;
+  // 下班打卡：今天還沒上班就先鎖住；已經打過下班（clockedIn===false 但有 sOut）也鎖住，防止重複
+  bOut.disabled = !S.clockedIn;
+  // 若有待審核補卡衝突，維持鎖定（避免 GPS 刷新等其他流程把鎖定覆蓋掉）
+  if(S.pendingMakeupConflictType==='in')  bIn.disabled=true;
+  if(S.pendingMakeupConflictType==='out') bOut.disabled=true;
 }
 
 // 核心修復：每次開啟系統都向資料庫核對「今天實際打卡狀態」，
@@ -1250,8 +1280,40 @@ async function syncTodayClockStatus(){
     if(lastOut){ $('sOut').textContent = timeOf(lastOut); $('sOutNote').textContent='完成'; }
     // 只要今天最後一筆是 in（還沒打下班），就視為「已上班、待下班」
     S.clockedIn = !!(lastIn && (!lastOut || new Date(lastIn.checked_at) > new Date(lastOut.checked_at)));
-    if($('btnClock')) enableBtn();
+    enableBtn();
+    await checkPendingMakeupConflict();
   }catch(e){ console.error('syncTodayClockStatus 錯誤：', e); }
+}
+
+// 保護機制：若今天已有一筆「待審核」的補卡申請，跟按鈕即將記錄的類型相同，
+// 就擋下打卡並提示，避免核准前又手動打一次卡，產生重複/衝突的紀錄
+async function checkPendingMakeupConflict(){
+  try{
+    const u = S.users[S.role];
+    if(!u || !u.empId) return;
+    const data = await sbGet('makeup_requests', {
+      emp_id: 'eq.' + u.empId,
+      status: 'eq.pending'
+    });
+    const banner = $('mkConflictWarn');
+    if(!data || !Array.isArray(data)){ if(banner)banner.style.display='none'; return; }
+    const todayStr = today();
+    const todaysPending = data.filter(m => m.date === todayStr);
+    const nextType = S.clockedIn ? 'out' : 'in';
+    const conflict = todaysPending.find(m => m.type === nextType);
+    if(conflict){
+      if(banner){
+        banner.style.display='block';
+        banner.textContent = `⚠️ 您今天已送出一筆補卡申請（${conflict.type==='in'?'上班':'下班'} ${conflict.time}），正在等待老闆審核，請勿重複打卡以免產生重複紀錄。核准後狀態會自動更新。`;
+      }
+      S.pendingMakeupConflictType = nextType;
+      const targetBtn = $(nextType==='in'?'btnClockIn':'btnClockOut');
+      if(targetBtn) targetBtn.disabled = true;
+    } else {
+      S.pendingMakeupConflictType = null;
+      if(banner) banner.style.display='none';
+    }
+  }catch(e){ console.error('checkPendingMakeupConflict 錯誤：', e); }
 }
 
 // 核心修復：本月緩衝額度改為向資料庫核對「這個月實際遲到總分鐘數」，
@@ -1296,12 +1358,13 @@ async function syncMonthlyBuffer(){
 /* ════════════════════════════════════════
    打卡
 ════════════════════════════════════════ */
-async function doClockAction(){
-  $('btnClock').disabled=true;
+async function doClockAction(type){
+  const btnIn=$('btnClockIn'), btnOut=$('btnClockOut');
+  if(btnIn)btnIn.disabled=true; if(btnOut)btnOut.disabled=true; // 送出期間先鎖住兩顆，避免連點
   const now=new Date();const ts=now.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
   const sh=getShift();
   const near=OFFICES.filter(o=>o.lat).map(o=>({o,d:hav(S.gps?.la||0,S.gps?.lo||0,o.lat,o.lng)})).sort((a,b)=>a.d-b.d)[0];
-  if(!S.clockedIn){
+  if(type==='in'){
     const c=calcLate(now,sh);
     S.clockedIn=true;S.inTime=ts;S.inDate=today();
     if(c.usedBuf>0)S.buf.usedMins+=c.usedBuf;
@@ -1315,9 +1378,7 @@ async function doClockAction(){
     else if(c.overMins===0){bn.className='banner buf';bn.textContent=`🟡 遲到 ${c.lateMins} 分，月緩衝扣除，剩 ${remain} 分｜下班 ${c.minOut}`;}
     else{bn.className='banner over';bn.textContent=`🔴 遲到 ${c.lateMins} 分，超出 ${c.overMins} 分｜下班 ${c.minOut}`;}
     addLog('in','上班打卡',near?.o.name||'遠端',ts,c,sh);
-    // 存到後端
     saveCheckin(S.users[S.role].empId,'in',S.gps?.la,S.gps?.lo,near?.o.id,sh.key);
-    // 遲到提示：員工不顯示金額
     const canSeeMoney=ROLES[S.role].canViewSalary;
     const msg=c.status==='ontime'?`✅ 準時上班 ${ts}`:
       c.status==='flex'?`✅ 彈性時段 ${ts}，下班 ${c.minOut}`:
@@ -1327,11 +1388,12 @@ async function doClockAction(){
   }else{
     S.clockedIn=false;$('sOut').textContent=ts;$('sOutNote').textContent='完成';
     addLog('out','下班打卡',near?.o.name||'遠端',ts,null,sh);
-    // 存到後端
     saveCheckin(S.users[S.role].empId,'out',S.gps?.la,S.gps?.lo,near?.o.id,sh.key);
     toast(`下班打卡 ${ts}（${sh.name}）`,'ok');
   }
-  renderBuffer();renderSalaryPage();setTimeout(getGPS,400);
+  renderBuffer();renderSalaryPage();
+  enableBtn(); // 依最新狀態重新開關兩顆按鈕
+  setTimeout(getGPS,400);
 }
 
 /* ════════════════════════════════════════
@@ -1440,6 +1502,7 @@ async function approveMakeup(id){
   }catch(e){ console.error('approveMakeup 錯誤：', e); toast('核准失敗，請重試','err'); return; }
   S.makeupRecords=S.makeupRecords.map(m=>m.id===id?Object.assign({},m,{status:'approved'}):m);
   renderMakeupList();
+  syncTodayClockStatus();
   toast('✅ 已核准補卡，已補進打卡紀錄','ok');
   const empName=(S.employees.find(e=>e.id===mk.empId)||{}).name||mk.empId;
   sendLineMsg(`✅ 補卡核准通知\n\n員工：${empName}\n日期：${mk.date}\n類型：${mk.type==='in'?'上班卡':'下班卡'}\n時間：${mk.time}`);
@@ -1449,6 +1512,7 @@ async function rejectMakeup(id){
   try{ await api('PATCH','/api/makeups/'+id,{status:'rejected'}); }catch(e){ console.error('rejectMakeup 錯誤：', e); }
   S.makeupRecords=S.makeupRecords.map(m=>m.id===id?Object.assign({},m,{status:'rejected'}):m);
   renderMakeupList();
+  syncTodayClockStatus();
   toast('已拒絕補卡','warn');
 }
 async function submitMakeup(){
@@ -1476,6 +1540,7 @@ async function submitMakeup(){
   if(saved && saved.id){
     S.makeupRecords.unshift({id:saved.id,empId:targetId,date,type,time,reason,status:'pending'});
     renderMakeupList();
+    if(targetId===u.empId) checkPendingMakeupConflict();
     $('mkDate').value=today();$('mkTime').value=$('mkReason').value='';
     toast('📋 補卡申請已送出，等待老闆審核','ok');
     const typeLabel=type==='in'?'上班卡':'下班卡';
@@ -2176,6 +2241,8 @@ function switchCkTab(n){
   $('ckTab2').style.color      = n===2 ? '#1a1808'     : 'var(--gold)';
   $('ckTab3').style.background = n===3 ? 'var(--gold)' : 'none';
   $('ckTab3').style.color      = n===3 ? '#1a1808'     : 'var(--gold)';
+  $('ckTab4').style.background = n===4 ? 'var(--gold)' : 'none';
+  $('ckTab4').style.color      = n===4 ? '#1a1808'     : 'var(--gold)';
   renderCheckinPage();
 }
 
@@ -2201,6 +2268,42 @@ function renderCheckinPage(){
       '<div class="section"><div class="sec-head">🏆 全勤名單</div><div style="padding:10px 14px">'+
       renderPerfectAttendanceHTML(S_ckYear, S_ckMonth) +
       '</div></div>';
+  } else if(S_ckTab === 4){
+    // 每日明細（含地點；地圖連結與預覽僅老闆可見）
+    const isOwner = S.role==='owner';
+    const byEmpDay = {}; // empId -> date -> {inT,inLat,inLng,outT,outLat,outLng}
+    (S.allCheckins||[]).forEach(function(c){
+      const d = tDateStr(c.checked_at);
+      if(!d.startsWith(ym)) return;
+      if(!byEmpDay[c.empId]) byEmpDay[c.empId]={};
+      if(!byEmpDay[c.empId][d]) byEmpDay[c.empId][d]={inT:null,outT:null};
+      const t = tTimeStr(c.checked_at);
+      const rec = byEmpDay[c.empId][d];
+      if(c.type==='in' && (!rec.inT || t<rec.inT)){ rec.inT=t; rec.inLat=c.lat; rec.inLng=c.lng; }
+      if(c.type==='out' && (!rec.outT || t>rec.outT)){ rec.outT=t; rec.outLat=c.lat; rec.outLng=c.lng; }
+    });
+    const DAYS=['日','一','二','三','四','五','六'];
+    const rows=[];
+    actEmps.forEach(function(e){
+      const days = byEmpDay[e.id]||{};
+      Object.keys(days).sort().forEach(function(d){ rows.push({e:e,d:d,v:days[d]}); });
+    });
+    rows.sort(function(a,b){ return a.d===b.d ? a.e.name.localeCompare(b.e.name) : a.d.localeCompare(b.d); });
+    const mapIcon=(lat,lng,label)=> (isOwner&&lat&&lng) ? ` <span onclick="showMapModal(${lat},${lng},'${label}')" style="cursor:pointer">📍</span>`:'';
+    const tableRows=rows.map(function(r){
+      const wd=DAYS[new Date(r.d).getDay()];
+      return '<tr style="border-bottom:1px solid var(--rule)">'+
+        '<td style="padding:7px 4px;font-size:12px;color:#999">'+r.d.slice(5)+'('+wd+')</td>'+
+        '<td style="padding:7px 4px;font-weight:700;font-size:12px">'+r.e.name+'</td>'+
+        '<td style="padding:7px 4px;text-align:center;font-size:12px">'+(r.v.inT||'-')+mapIcon(r.v.inLat,r.v.inLng,r.e.name+' 上班 '+r.d)+'</td>'+
+        '<td style="padding:7px 4px;text-align:center;font-size:12px">'+(r.v.outT||'-')+mapIcon(r.v.outLat,r.v.outLng,r.e.name+' 下班 '+r.d)+'</td></tr>';
+    }).join('');
+    $('ckContent').innerHTML =
+      '<div class="section"><div class="sec-head">📅 每日打卡明細'+(isOwner?'（點 📍 看地圖）':'')+'</div>'+
+      '<div style="overflow-x:auto;padding:4px 14px"><table style="width:100%;border-collapse:collapse">'+
+      '<tr style="color:#aaa;font-size:11px;border-bottom:2px solid var(--gold)"><th style="padding:6px 4px;text-align:left">日期</th><th style="padding:6px 4px;text-align:left">員工</th><th style="padding:6px 4px">上班</th><th style="padding:6px 4px">下班</th></tr>'+
+      (tableRows||'<tr><td colspan="4" style="padding:14px;color:#bbb;text-align:center">本月尚無打卡紀錄</td></tr>')+
+      '</table></div></div>';
   } else {
     // 請假總覽
     const leaveList=actEmps.map(function(e){const leaves=S.leaveRecords.filter(function(r){return r.empId===e.id&&r.status==='approved'&&(r.start||'').startsWith(ym);});return {e,leaves};}).filter(function(x){return x.leaves.length>0;});
