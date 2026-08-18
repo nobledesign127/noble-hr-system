@@ -1,7 +1,7 @@
 Index · HTML
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-08-18-B ═══
-     包含: 08-18-A 基礎 + 新增自動偵測新版本並提示重新整理(不用再手動通知員工關掉重開)
+<!-- ═══ NOBLE HR 版本: v2026-08-18-C ═══
+     包含: 08-18-B 基礎 + 打卡地點地圖開放給行政主管(會計維持不可見，含修正薪資頁既有漏洞)
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -855,7 +855,7 @@ async function loadAllCheckins(){
   }catch(e){ console.error('loadAllCheckins 錯誤：', e); }
 }
 function showMapModal(lat,lng,label){
-  if(S.role!=='owner')return; // 僅老闆可查看打卡地點細節
+  if(!(S.role==='owner'||S.role==='admin'))return; // 僅老闆與行政主管可查看打卡地點細節
   const old=document.getElementById('mapModalOverlay'); if(old)old.remove();
   const ov=document.createElement('div');
   ov.id='mapModalOverlay';
@@ -1051,7 +1051,7 @@ async function addSuspensionDay(){
 /* ════════════════════════════════════════
    State
 ════════════════════════════════════════ */
-const APP_VERSION = 'v2026-08-18-B'; // 每次改版時同步更新（跟檔案最上方的版本註解一致）
+const APP_VERSION = 'v2026-08-18-C'; // 每次改版時同步更新（跟檔案最上方的版本註解一致）
 
 // 自動偵測新版本：不用手動通知員工「請關掉重開」，系統會自己提醒
 async function checkForNewVersion(){
@@ -2307,7 +2307,7 @@ function renderCheckinPage(){
       '</div></div>';
   } else if(S_ckTab === 4){
     // 每日明細：每人每天都列一行（休息日／國定假日／請假／缺卡／正常），比照 NUEiP 匯出格式
-    const isOwner = S.role==='owner';
+    const isOwner = S.role==='owner' || S.role==='admin';
     const byEmpDay = {};
     (S.allCheckins||[]).forEach(function(c){
       const d = tDateStr(c.checked_at);
@@ -2495,8 +2495,9 @@ function renderAllReport(role){
   }).join('');
   const expRows=rows.filter(function(r){return r.st.expAmt>0;}).map(function(r){return '<div class="comp-item"><span style="font-weight:700">'+r.e.name+'</span><span style="font-weight:900;color:var(--teal)">'+fmt(r.st.expAmt)+'</span></div>';}).join('');
   const expTotal=rows.reduce(function(s,r){return s+r.st.expAmt;},0);
-  // 外勤員工打卡地點明細
-  const remoteRows=rows.filter(function(r){return r.e.remotePunch;});
+  // 外勤員工打卡地點明細（僅行政主管可見，會計不可見座標細節）
+  const canSeeLoc = S.role==='admin';
+  const remoteRows=canSeeLoc?rows.filter(function(r){return r.e.remotePunch;}):[];
   const locHtml=remoteRows.map(function(r){
     const dayLocs=Object.entries(r.st.locations).sort(function(a,b){return a[0].localeCompare(b[0]);});
     if(!dayLocs.length) return '';
