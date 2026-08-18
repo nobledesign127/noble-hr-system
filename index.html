@@ -1,9 +1,7 @@
-
-
 Index · HTML
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-07-29-D ═══
-     包含: 29-C 基礎 + 每日明細升級(比照NUEiP)：每人每天一列，含休息日/國定假日/請假/缺卡/遲到分鐘/職稱，地點仍僅老闆可見
+<!-- ═══ NOBLE HR 版本: v2026-08-18-B ═══
+     包含: 08-18-A 基礎 + 新增自動偵測新版本並提示重新整理(不用再手動通知員工關掉重開)
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -254,6 +252,9 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 </style>
 </head>
 <body>
+<div id="updateBanner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:linear-gradient(90deg,var(--gold),#e0c060);color:#1a1808;padding:10px 14px;font-size:13px;font-weight:900;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.15)">
+  🆕 系統已更新，<span style="text-decoration:underline;cursor:pointer" onclick="location.reload()">點此重新整理</span>
+</div>
 <div id="app">
  
 <!-- HEADER -->
@@ -1050,6 +1051,27 @@ async function addSuspensionDay(){
 /* ════════════════════════════════════════
    State
 ════════════════════════════════════════ */
+const APP_VERSION = 'v2026-08-18-B'; // 每次改版時同步更新（跟檔案最上方的版本註解一致）
+
+// 自動偵測新版本：不用手動通知員工「請關掉重開」，系統會自己提醒
+async function checkForNewVersion(){
+  try{
+    const res = await fetch(location.pathname + '?_=' + Date.now(), {cache:'no-store'});
+    const html = await res.text();
+    const m = html.match(/NOBLE HR 版本:\s*(v[\d\-A-Za-z]+)/);
+    if(m && m[1] && m[1] !== APP_VERSION){
+      const banner = document.getElementById('updateBanner');
+      if(banner) banner.style.display='block';
+    }
+  }catch(e){ /* 網路異常時不打擾使用者，安靜略過 */ }
+}
+function startVersionWatcher(){
+  checkForNewVersion();
+  setInterval(checkForNewVersion, 5*60*1000); // 每 5 分鐘背景檢查一次
+  document.addEventListener('visibilitychange', function(){
+    if(document.visibilityState === 'visible') checkForNewVersion();
+  }); // 從背景切回來（最常見：準備打卡前）也立即檢查一次
+}
 const S = {
   role:'owner',
   users:{
@@ -1210,12 +1232,24 @@ function getGPS(){
   if(!navigator.geolocation){setGps('fail','不支援GPS','');return;}
   // 第 1-2 次用高精度；第 3 次起改用快速模式（WiFi/基地台定位，室內較穩）
   const highAcc=gpsTries<2;
-  navigator.geolocation.getCurrentPosition(pos=>{
+  navigator.geolocation.getCurrentPosition(async pos=>{
     gpsTries=0;
     const{latitude:la,longitude:lo,accuracy:ac}=pos.coords; S.gps={la,lo,ac};
-    // 外勤員工：不限打卡地點
-    const me=S.employees.find(x=>x.id===(S.users[S.role]||{}).empId);
-    if(me&&me.remotePunch){
+    // 外勤員工：不限打卡地點——即時向資料庫核對最新設定，不信任快取的 S.employees
+    // （避免老闆剛關掉外勤，員工手機還沒重開系統，卻仍延用舊設定繞過地點限制）
+    const myId = (S.users[S.role]||{}).empId;
+    let isRemote = false;
+    try{
+      const fresh = await sbGet('employees', {id:'eq.'+myId, select:'remote_punch'});
+      isRemote = !!(fresh && fresh[0] && fresh[0].remote_punch);
+      // 同步更新本地快取，讓畫面其他地方（例如員工管理頁）也保持一致
+      S.employees = S.employees.map(x=>x.id===myId?Object.assign({},x,{remotePunch:isRemote}):x);
+    }catch(e){
+      console.error('外勤設定即時核對失敗，改用快取值：', e);
+      const me=S.employees.find(x=>x.id===myId);
+      isRemote = !!(me && me.remotePunch);
+    }
+    if(isRemote){
       $('mapLabel').textContent='🛰️ 外勤模式';
       $('mapCoords').textContent=`${la.toFixed(6)}, ${lo.toFixed(6)}  ±${Math.round(ac)}m`;
       setGps('ok','外勤打卡（不限地點）','');enableBtn();return;
@@ -2753,6 +2787,7 @@ async function initLIFF(){
     loadMakeups();
     { const _role=ROLES[S.role]; const _u=S.users[S.role]; loadExpenses(_role.canViewAll ? null : _u.empId); }
     loadAllCheckins();
+    startVersionWatcher();
     loadHolidays().then(()=>{
       try{
         const h=S.holidays&&S.holidays[today()];
@@ -2771,6 +2806,3 @@ async function initLIFF(){
 </script>
 </body>
 </html>
- 
-
-
