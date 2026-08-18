@@ -1,7 +1,7 @@
 Index · HTML
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-08-18-C ═══
-     包含: 08-18-B 基礎 + 打卡地點地圖開放給行政主管(會計維持不可見，含修正薪資頁既有漏洞)
+<!-- ═══ NOBLE HR 版本: v2026-08-18-F ═══
+     包含: 08-18-E 基礎 + 部門分類改用系統權限判斷主管/會計(不受職稱文字影響，如「闆娘」)
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -588,10 +588,24 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
     <button id="ckTab3" onclick="switchCkTab(3)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">🏆 全勤名單</button>
     <button id="ckTab4" onclick="switchCkTab(4)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">📅 每日明細</button>
   </div>
-  <div style="display:flex;align-items:center;gap:8px;margin:0 14px 14px">
+  <div style="display:flex;align-items:center;gap:8px;margin:0 14px 10px">
     <button onclick="changeCkMonth(-1)" style="border:none;background:var(--mist);border-radius:8px;padding:6px 14px;font-size:18px;cursor:pointer">‹</button>
     <div id="ckMonthLabel" style="flex:1;text-align:center;font-size:15px;font-weight:900;color:var(--ink)"></div>
     <button onclick="changeCkMonth(1)" style="border:none;background:var(--mist);border-radius:8px;padding:6px 14px;font-size:18px;cursor:pointer">›</button>
+  </div>
+  <div id="ckFilterRow" style="display:none;gap:8px;margin:0 14px 14px">
+    <select id="ckDeptSelect" class="f-select" style="flex:1;margin-bottom:0" onchange="onCkDeptChange()">
+      <option value="all">全部部門</option>
+      <option value="室內設計">室內設計</option>
+      <option value="平面設計">平面設計</option>
+      <option value="視覺設計">視覺設計</option>
+      <option value="行政">行政</option>
+      <option value="主管/總監/會計">主管／總監／會計</option>
+      <option value="其他">其他</option>
+    </select>
+    <select id="ckEmpSelect" class="f-select" style="flex:1;margin-bottom:0" onchange="onCkEmpChange()">
+      <option value="all">全部員工</option>
+    </select>
   </div>
   <div id="ckContent"></div>
 </div>
@@ -1051,7 +1065,7 @@ async function addSuspensionDay(){
 /* ════════════════════════════════════════
    State
 ════════════════════════════════════════ */
-const APP_VERSION = 'v2026-08-18-C'; // 每次改版時同步更新（跟檔案最上方的版本註解一致）
+const APP_VERSION = 'v2026-08-18-F'; // 每次改版時同步更新（跟檔案最上方的版本註解一致）
 
 // 自動偵測新版本：不用手動通知員工「請關掉重開」，系統會自己提醒
 async function checkForNewVersion(){
@@ -2262,7 +2276,22 @@ function renderPerfectAttendanceHTML(year, month){
 ════════════════════════════════════════ */
 let S_ckMonth = new Date().getMonth();
 let S_ckYear  = new Date().getFullYear();
-let S_ckTab   = 1; // 1=遲到總覽 2=請假總覽
+let S_ckTab   = 1; // 1=遲到總覽 2=請假總覽 3=全勤名單 4=每日明細
+let S_ckDept  = 'all'; // 每日明細用：部門篩選
+let S_ckEmp   = 'all'; // 每日明細用：單一員工篩選
+
+// 依「職稱」關鍵字歸類部門（系統目前沒有獨立的部門欄位，用職稱比對）
+function deptOfRole(emp){
+  const role = (emp && emp.role) || '';
+  const sysRole = (emp && emp.systemRole) || '';
+  // 主管／總監／會計：優先用系統權限判斷（老闆、會計），不受職稱文字影響（例如「闆娘」不含「主管」兩字）
+  if(sysRole==='老闆' || sysRole==='會計' || role.indexOf('總監')>-1) return '主管/總監/會計';
+  if(role.indexOf('室內設計')>-1) return '室內設計';
+  if(role.indexOf('平面設計')>-1) return '平面設計';
+  if(role.indexOf('視覺設計')>-1) return '視覺設計';
+  if(role.indexOf('行政')>-1)     return '行政'; // 行政主管職稱多半是「行政」，維持在行政部門而非管理層
+  return '其他';
+}
  
 function changeCkMonth(dir){
   S_ckMonth += dir;
@@ -2280,6 +2309,28 @@ function switchCkTab(n){
   $('ckTab3').style.color      = n===3 ? '#1a1808'     : 'var(--gold)';
   $('ckTab4').style.background = n===4 ? 'var(--gold)' : 'none';
   $('ckTab4').style.color      = n===4 ? '#1a1808'     : 'var(--gold)';
+  const fr = $('ckFilterRow');
+  if(fr) fr.style.display = n===4 ? 'flex' : 'none';
+  if(n===4) populateCkEmpSelect();
+  renderCheckinPage();
+}
+function populateCkEmpSelect(){
+  const sel = $('ckEmpSelect'); if(!sel) return;
+  const actEmps = S.employees.filter(function(e){ return e.status==='active'; }).sort(function(a,b){return a.name.localeCompare(b.name);});
+  const cur = sel.value || 'all';
+  sel.innerHTML = '<option value="all">全部員工</option>' + actEmps.map(function(e){
+    return '<option value="'+e.id+'">'+e.name+'</option>';
+  }).join('');
+  sel.value = cur;
+}
+function onCkDeptChange(){
+  S_ckDept = $('ckDeptSelect').value;
+  S_ckEmp = 'all'; $('ckEmpSelect').value = 'all'; // 選部門時清空單一員工篩選
+  renderCheckinPage();
+}
+function onCkEmpChange(){
+  S_ckEmp = $('ckEmpSelect').value;
+  if(S_ckEmp!=='all'){ S_ckDept='all'; $('ckDeptSelect').value='all'; } // 選特定員工時忽略部門篩選
   renderCheckinPage();
 }
  
@@ -2323,8 +2374,15 @@ function renderCheckinPage(){
     const LEAVE_NAME={annual:'特休',sick:'病假',menstrual:'生理假',personal:'事假',comp:'補休',checkup:'產檢假'};
     const daysInMonth = new Date(S_ckYear, S_ckMonth+1, 0).getDate();
     const todayStr = today();
+    // 套用「部門」或「單一員工」篩選（不影響其他分頁用的 actEmps）
+    let filteredEmps = actEmps;
+    if(S_ckEmp && S_ckEmp!=='all'){
+      filteredEmps = actEmps.filter(function(e){ return e.id===S_ckEmp; });
+    } else if(S_ckDept && S_ckDept!=='all'){
+      filteredEmps = actEmps.filter(function(e){ return deptOfRole(e)===S_ckDept; });
+    }
     const rows=[];
-    actEmps.forEach(function(e){
+    filteredEmps.forEach(function(e){
       for(let d=1; d<=daysInMonth; d++){
         const ds = S_ckYear+'-'+String(S_ckMonth+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
         if(ds > todayStr) break; // 未來日期不顯示
