@@ -1,7 +1,7 @@
 Index · HTML
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-08-18-F ═══
-     包含: 08-18-E 基礎 + 部門分類改用系統權限判斷主管/會計(不受職稱文字影響，如「闆娘」)
+<!-- ═══ NOBLE HR 版本: v2026-08-19-A ═══
+     包含: 08-18-F 基礎 + 修復「今日打卡紀錄」只存記憶體不接資料庫的問題 + 外勤即時核對加診斷log
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -1065,7 +1065,7 @@ async function addSuspensionDay(){
 /* ════════════════════════════════════════
    State
 ════════════════════════════════════════ */
-const APP_VERSION = 'v2026-08-18-F'; // 每次改版時同步更新（跟檔案最上方的版本註解一致）
+const APP_VERSION = 'v2026-08-19-A'; // 每次改版時同步更新（跟檔案最上方的版本註解一致）
 
 // 自動偵測新版本：不用手動通知員工「請關掉重開」，系統會自己提醒
 async function checkForNewVersion(){
@@ -1256,6 +1256,7 @@ function getGPS(){
     try{
       const fresh = await sbGet('employees', {id:'eq.'+myId, select:'remote_punch'});
       isRemote = !!(fresh && fresh[0] && fresh[0].remote_punch);
+      console.log('外勤即時核對：empId=', myId, '資料庫回傳=', fresh, '→ isRemote=', isRemote);
       // 同步更新本地快取，讓畫面其他地方（例如員工管理頁）也保持一致
       S.employees = S.employees.map(x=>x.id===myId?Object.assign({},x,{remotePunch:isRemote}):x);
     }catch(e){
@@ -1320,6 +1321,25 @@ async function syncTodayClockStatus(){
       const ds = d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0');
       return ds === todayStr;
     }).sort((a,b)=> new Date(a.checked_at) - new Date(b.checked_at));
+    // 修復：「今日打卡紀錄」清單改用真實資料庫紀錄重建，不再只靠本次登入期間手動打卡才會出現
+    const officeById = id => OFFICES.find(o=>o.id===id);
+    S.logs = [...todays].reverse().map(c=>{
+      const d = new Date(new Date(c.checked_at).getTime() + 8*3600000);
+      const t = String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0');
+      const o = officeById(c.office_id);
+      const loc = c.office_id==='remote' ? '外勤' : (o ? o.name : (c.office_id==='makeup' ? '補卡核准' : '外勤'));
+      return { type:c.type, action: c.type==='in'?'上班打卡':'下班打卡', loc, time:t, c:null, sh:null };
+    });
+    if($('logList')) $('logList').innerHTML = S.logs.length ? S.logs.map(l=>{
+      return `<div class="log-item">
+        <div class="log-dot ${l.type==='in'?'in':'out'}"></div>
+        <div class="log-info">
+          <div class="log-act">${l.action}</div>
+          <div class="log-meta">📍 ${l.loc}</div>
+        </div>
+        <div class="log-time">${l.time}</div>
+      </div>`;
+    }).join('') : '<div class="empty">尚無打卡紀錄</div>';
     if(!todays.length){ S.clockedIn=false; S.inTime=null; S.inDate=null; return; }
     const lastIn  = [...todays].reverse().find(c=>c.type==='in');
     const lastOut = [...todays].reverse().find(c=>c.type==='out');
