@@ -1,7 +1,7 @@
 Index · HTML
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-08-19-A ═══
-     包含: 08-18-F 基礎 + 修復「今日打卡紀錄」只存記憶體不接資料庫的問題 + 外勤即時核對加診斷log
+<!-- ═══ NOBLE HR 版本: v2026-08-19-C ═══
+     包含: 08-19-B 基礎 + 修復每日明細打卡後不即時更新 + 地圖預覽視窗新增地址反查(試用版，用免費OSM服務)
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -881,9 +881,19 @@ function showMapModal(lat,lng,label){
       <span style="cursor:pointer;font-size:18px;color:#999" onclick="document.getElementById('mapModalOverlay').remove()">✕</span>
     </div>
     <iframe src="https://maps.google.com/maps?q=${lat},${lng}&z=17&output=embed" style="width:100%;height:300px;border:none"></iframe>
-    <div style="padding:10px 16px;font-size:12px;color:#888">${lat}, ${lng}　<a href="https://maps.google.com/?q=${lat},${lng}" target="_blank" style="color:var(--teal)">在 Google 地圖開啟</a></div>
+    <div id="mapModalAddr" style="padding:10px 16px 4px;font-size:13px;color:#555;font-weight:700">📮 查詢地址中…</div>
+    <div style="padding:0 16px 12px;font-size:12px;color:#888">${lat}, ${lng}　<a href="https://maps.google.com/?q=${lat},${lng}" target="_blank" style="color:var(--teal)">在 Google 地圖開啟</a></div>
   </div>`;
   document.body.appendChild(ov);
+  // 免費反查地址服務（OpenStreetMap），只在使用者主動點開時查一次，不做整表批次查詢
+  fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=zh-TW`)
+    .then(r=>r.json())
+    .then(d=>{
+      const el=document.getElementById('mapModalAddr');
+      if(!el) return;
+      el.textContent = d && d.display_name ? '📮 '+d.display_name : '📮 查無地址資料';
+    })
+    .catch(()=>{ const el=document.getElementById('mapModalAddr'); if(el) el.textContent='📮 地址查詢失敗（僅測試用免費服務，正式上線建議改用付費地圖API較穩定）'; });
 }
 function officeLabel(officeId,lat,lng){
   const o = OFFICES.find(x=>x.id===officeId);
@@ -1065,7 +1075,7 @@ async function addSuspensionDay(){
 /* ════════════════════════════════════════
    State
 ════════════════════════════════════════ */
-const APP_VERSION = 'v2026-08-19-A'; // 每次改版時同步更新（跟檔案最上方的版本註解一致）
+const APP_VERSION = 'v2026-08-19-C'; // 每次改版時同步更新（跟檔案最上方的版本註解一致）
 
 // 自動偵測新版本：不用手動通知員工「請關掉重開」，系統會自己提醒
 async function checkForNewVersion(){
@@ -1292,10 +1302,10 @@ function setGps(cls,txt,dist){$('gpsBar').className='gps-bar '+cls;$('gpsText').
 function enableBtn(){
   const bIn=$('btnClockIn'), bOut=$('btnClockOut');
   if(!bIn || !bOut) return;
-  // 上班打卡：今天已打過上班（clockedIn 或已有 sIn 時間）就鎖住，防止重複
-  const alreadyIn = S.clockedIn || !!S.inTime;
-  bIn.disabled = alreadyIn;
-  // 下班打卡：今天還沒上班就先鎖住；已經打過下班（clockedIn===false 但有 sOut）也鎖住，防止重複
+  // 上班打卡：只在「目前正處於已上班、尚未下班」狀態時鎖住（防止同一段上班中重複點）
+  // 完成下班後會自動解鎖，允許同一天再次上班（例如外出回來、或需要多次測試）
+  bIn.disabled = S.clockedIn;
+  // 下班打卡：還沒上班就先鎖住，上班後才能點
   bOut.disabled = !S.clockedIn;
   // 若有待審核補卡衝突，維持鎖定（避免 GPS 刷新等其他流程把鎖定覆蓋掉）
   if(S.pendingMakeupConflictType==='in')  bIn.disabled=true;
@@ -1449,7 +1459,9 @@ async function doClockAction(type){
     else if(c.overMins===0){bn.className='banner buf';bn.textContent=`🟡 遲到 ${c.lateMins} 分，月緩衝扣除，剩 ${remain} 分｜下班 ${c.minOut}`;}
     else{bn.className='banner over';bn.textContent=`🔴 遲到 ${c.lateMins} 分，超出 ${c.overMins} 分｜下班 ${c.minOut}`;}
     addLog('in','上班打卡',near?.o.name||'遠端',ts,c,sh);
-    saveCheckin(S.users[S.role].empId,'in',S.gps?.la,S.gps?.lo,near?.o.id,sh.key);
+    saveCheckin(S.users[S.role].empId,'in',S.gps?.la,S.gps?.lo,near?.o.id,sh.key).then(saved=>{
+      if(saved){ S.allCheckins=S.allCheckins||[]; S.allCheckins.unshift({empId:saved.emp_id,type:saved.type,checked_at:saved.checked_at,lat:saved.lat,lng:saved.lng,officeId:saved.office_id}); }
+    });
     const canSeeMoney=ROLES[S.role].canViewSalary;
     const msg=c.status==='ontime'?`✅ 準時上班 ${ts}`:
       c.status==='flex'?`✅ 彈性時段 ${ts}，下班 ${c.minOut}`:
@@ -1459,7 +1471,9 @@ async function doClockAction(type){
   }else{
     S.clockedIn=false;$('sOut').textContent=ts;$('sOutNote').textContent='完成';
     addLog('out','下班打卡',near?.o.name||'遠端',ts,null,sh);
-    saveCheckin(S.users[S.role].empId,'out',S.gps?.la,S.gps?.lo,near?.o.id,sh.key);
+    saveCheckin(S.users[S.role].empId,'out',S.gps?.la,S.gps?.lo,near?.o.id,sh.key).then(saved=>{
+      if(saved){ S.allCheckins=S.allCheckins||[]; S.allCheckins.unshift({empId:saved.emp_id,type:saved.type,checked_at:saved.checked_at,lat:saved.lat,lng:saved.lng,officeId:saved.office_id}); }
+    });
     toast(`下班打卡 ${ts}（${sh.name}）`,'ok');
   }
   renderBuffer();renderSalaryPage();
