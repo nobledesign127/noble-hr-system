@@ -1,7 +1,7 @@
 Index · HTML
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-08-19-C ═══
-     包含: 08-19-B 基礎 + 修復每日明細打卡後不即時更新 + 地圖預覽視窗新增地址反查(試用版，用免費OSM服務)
+<!-- ═══ NOBLE HR 版本: v2026-08-31-A ═══
+     包含: 08-19-C 基礎 + 修復核心bug:打卡時緩衝額度計算的時序競速問題(手速快/網路慢時會用到預設值0，漏算本月稍早的大遲到)
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -1075,7 +1075,7 @@ async function addSuspensionDay(){
 /* ════════════════════════════════════════
    State
 ════════════════════════════════════════ */
-const APP_VERSION = 'v2026-08-19-C'; // 每次改版時同步更新（跟檔案最上方的版本註解一致）
+const APP_VERSION = 'v2026-08-31-A'; // 每次改版時同步更新（跟檔案最上方的版本註解一致）
 
 // 自動偵測新版本：不用手動通知員工「請關掉重開」，系統會自己提醒
 async function checkForNewVersion(){
@@ -1442,6 +1442,11 @@ async function syncMonthlyBuffer(){
 async function doClockAction(type){
   const btnIn=$('btnClockIn'), btnOut=$('btnClockOut');
   if(btnIn)btnIn.disabled=true; if(btnOut)btnOut.disabled=true; // 送出期間先鎖住兩顆，避免連點
+  if(type==='in'){
+    // 關鍵修復：打卡當下強制重新核對本月真實遲到總量，不信任開機時可能還沒跑完的背景同步
+    // （避免手速快/網路慢時，用到預設值0，導致緩衝計算漏掉本月稍早的大遲到）
+    await syncMonthlyBuffer();
+  }
   const now=new Date();const ts=now.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
   const sh=getShift();
   const near=OFFICES.filter(o=>o.lat).map(o=>({o,d:hav(S.gps?.la||0,S.gps?.lo||0,o.lat,o.lng)})).sort((a,b)=>a.d-b.d)[0];
