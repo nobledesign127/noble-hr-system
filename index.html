@@ -1,7 +1,7 @@
 Index · HTML
 <!DOCTYPE html>
-<!-- ═══ NOBLE HR 版本: v2026-08-31-A ═══
-     包含: 08-19-C 基礎 + 修復核心bug:打卡時緩衝額度計算的時序競速問題(手速快/網路慢時會用到預設值0，漏算本月稍早的大遲到)
+<!-- ═══ NOBLE HR 版本: v2026-08-31-B ═══
+     包含: 08-31-A 基礎 + 修復外勤核對失敗時的安全漏洞(fail-open改為fail-closed) + GPS誤差過大自動重試
      部署前確認此版本號比 GitHub 上的新 -->
 <html lang="zh-TW">
 <head>
@@ -1075,7 +1075,7 @@ async function addSuspensionDay(){
 /* ════════════════════════════════════════
    State
 ════════════════════════════════════════ */
-const APP_VERSION = 'v2026-08-31-A'; // 每次改版時同步更新（跟檔案最上方的版本註解一致）
+const APP_VERSION = 'v2026-08-31-B'; // 每次改版時同步更新（跟檔案最上方的版本註解一致）
 
 // 自動偵測新版本：不用手動通知員工「請關掉重開」，系統會自己提醒
 async function checkForNewVersion(){
@@ -1257,8 +1257,16 @@ function getGPS(){
   // 第 1-2 次用高精度；第 3 次起改用快速模式（WiFi/基地台定位，室內較穩）
   const highAcc=gpsTries<2;
   navigator.geolocation.getCurrentPosition(async pos=>{
+    const{latitude:la,longitude:lo,accuracy:ac}=pos.coords;
+    // 定位誤差太大（常見於室內、地下室、建物遮蔽）：自動重新嘗試，避免用到不可靠的座標判斷是否超出範圍
+    if(ac>300 && gpsTries<5){
+      gpsTries++;
+      setGps('loading',`定位精度不足（誤差${Math.round(ac)}m），重試第 ${gpsTries} 次…`,'');
+      setTimeout(getGPS,1000);
+      return;
+    }
     gpsTries=0;
-    const{latitude:la,longitude:lo,accuracy:ac}=pos.coords; S.gps={la,lo,ac};
+    S.gps={la,lo,ac};
     // 外勤員工：不限打卡地點——即時向資料庫核對最新設定，不信任快取的 S.employees
     // （避免老闆剛關掉外勤，員工手機還沒重開系統，卻仍延用舊設定繞過地點限制）
     const myId = (S.users[S.role]||{}).empId;
@@ -1270,9 +1278,8 @@ function getGPS(){
       // 同步更新本地快取，讓畫面其他地方（例如員工管理頁）也保持一致
       S.employees = S.employees.map(x=>x.id===myId?Object.assign({},x,{remotePunch:isRemote}):x);
     }catch(e){
-      console.error('外勤設定即時核對失敗，改用快取值：', e);
-      const me=S.employees.find(x=>x.id===myId);
-      isRemote = !!(me && me.remotePunch);
+      console.error('外勤設定即時核對失敗，安全起見預設為「非外勤」（強制回公司範圍檢查）：', e);
+      isRemote = false; // 查詢失敗一律視為未開放外勤，避免用到過期快取誤放行
     }
     if(isRemote){
       $('mapLabel').textContent='🛰️ 外勤模式';
