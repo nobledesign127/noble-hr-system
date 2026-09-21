@@ -83,6 +83,9 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 .btn-clock:active{transform:scale(.97)}.btn-clock.in{background:var(--green);color:var(--white)}
 .btn-clock.out{background:var(--red);color:var(--white)}.btn-clock.night-in{background:var(--purple);color:var(--white)}
 .btn-clock:disabled{opacity:.4;cursor:not-allowed}
+.btn-clock.busy{opacity:.85!important;cursor:wait}
+.btn-clock.busy .btn-spin{display:inline-block;animation:btnspin .8s linear infinite}
+@keyframes btnspin{to{transform:rotate(360deg)}}
 .btn-sub{width:100%;padding:12px;border:none;border-radius:10px;font-size:13px;font-weight:900;cursor:pointer;margin-top:8px}
 .btn-sub.green{background:var(--green);color:var(--white)}.btn-sub.gold{background:var(--gold);color:var(--dark)}
 .btn-sub.purple{background:var(--purple);color:var(--white)}.btn-sub.blue{background:var(--blue);color:var(--white)}
@@ -244,7 +247,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 .bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:var(--white);border-top:1px solid var(--border);display:flex;padding-bottom:env(safe-area-inset-bottom,6px);z-index:50}
 .nav-btn{flex:1;padding:9px 0 6px;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:none;cursor:pointer;font-size:11.5px;color:#bbb;font-weight:700;transition:color .2s}
 .nav-btn.active{color:var(--gold)}.nav-icon{font-size:24px}
-.page{display:none;padding-bottom:78px}.page.active{display:block}
+.page{display:none;padding-bottom:96px}.page.active{display:block}
 .pg-title{padding:12px 14px 3px;font-size:14px;font-weight:900;color:var(--ink)}
 .pg-sub{padding:0 14px 9px;font-size:10px;color:#aaa}
 .empty{color:#ccc;font-size:12px;text-align:center;padding:18px}
@@ -294,6 +297,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
     <div class="gps-bar loading" id="gpsBar">
       <div class="gps-dot"></div><span id="gpsText">取得位置中…</span>
       <span style="margin-left:auto;font-weight:700" id="gpsDist"></span>
+      <button id="gpsRetryBtn" style="display:none;margin-left:8px;padding:4px 12px;border-radius:6px;border:none;background:var(--red);color:#fff;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">重新定位</button>
     </div>
     <div class="map-box">
       <div style="font-size:22px">📍</div><span id="mapLabel">等待定位…</span>
@@ -1251,11 +1255,13 @@ const OFFICES=[
   {id:'remote',name:'遠端辦公',lat:null,lng:null}
 ];
 let gpsTries=0;
+let gpsDegraded=false; // 高精度定位逾時/失敗後，自動降級為省電模式重試一次
 function getGPS(){
   setGps('loading','取得位置中…','');
   if(!navigator.geolocation){setGps('fail','不支援GPS','');return;}
-  // 第 1-2 次用高精度；第 3 次起改用快速模式（WiFi/基地台定位，室內較穩）
-  const highAcc=gpsTries<2;
+  const opts=gpsDegraded
+    ? {enableHighAccuracy:false,timeout:8000,maximumAge:0}
+    : {enableHighAccuracy:true,timeout:10000,maximumAge:0};
   navigator.geolocation.getCurrentPosition(async pos=>{
     const{latitude:la,longitude:lo,accuracy:ac}=pos.coords;
     // 定位誤差太大（常見於室內、地下室、建物遮蔽）：自動重新嘗試，避免用到不可靠的座標判斷是否超出範圍
@@ -1266,6 +1272,7 @@ function getGPS(){
       return;
     }
     gpsTries=0;
+    gpsDegraded=false;
     S.gps={la,lo,ac};
     // 外勤員工：不限打卡地點——即時向資料庫核對最新設定，不信任快取的 S.employees
     // （避免老闆剛關掉外勤，員工手機還沒重開系統，卻仍延用舊設定繞過地點限制）
@@ -1293,19 +1300,31 @@ function getGPS(){
     if(inRange||hasRemote){setGps('ok',inRange?`已進入 ${near.o.name}`:'遠端辦公','');enableBtn();}
     else{setGps('fail',`超出範圍 ${d-200}m`,`${d}m`);$('btnClockIn').disabled=true;$('btnClockOut').disabled=true;}
   },err=>{
-    gpsTries++;
-    if(err.code!==1&&gpsTries<4){
-      // 訊號弱或逾時：自動重試（最多 3 次）
-      setGps('loading',`定位中…重試第 ${gpsTries} 次`,'');
-      setTimeout(getGPS,1200);
-    }else{
-      const m={1:'請允許位置權限後點此重試',2:'GPS 訊號弱，點此重試',3:'定位逾時，點此重試'};
-      setGps('fail',m[err.code]||'定位失敗，點此重試','');
-      gpsTries=0;
+    // 非「權限被拒」的錯誤（逾時／訊號弱）：先自動降級為省電模式（WiFi/基地台定位）重試一次
+    if(err.code!==1 && !gpsDegraded){
+      gpsDegraded=true;
+      setGps('loading','定位逾時，改用省電模式重試…','');
+      getGPS();
+      return;
     }
-  },{enableHighAccuracy:highAcc,timeout:highAcc?10000:15000,maximumAge:30000});
+    gpsTries=0;
+    gpsDegraded=false;
+    setGps('fail','定位失敗，請確認已開啟定位權限，或移動到窗邊再試一次','');
+    $('btnClockIn').disabled=true;$('btnClockOut').disabled=true;
+  },opts);
 }
-function setGps(cls,txt,dist){$('gpsBar').className='gps-bar '+cls;$('gpsText').textContent=txt;$('gpsDist').textContent=dist;$('gpsBar').onclick=cls==='fail'?()=>{gpsTries=0;getGPS();}:null;}
+function setGps(cls,txt,dist){
+  $('gpsBar').className='gps-bar '+cls;
+  $('gpsText').textContent=txt;
+  $('gpsDist').textContent=dist;
+  const retry=()=>{gpsTries=0;gpsDegraded=false;getGPS();};
+  $('gpsBar').onclick=cls==='fail'?retry:null;
+  const btn=$('gpsRetryBtn');
+  if(btn){
+    btn.style.display=cls==='fail'?'inline-block':'none';
+    btn.onclick=e=>{e.stopPropagation();retry();};
+  }
+}
 function enableBtn(){
   const bIn=$('btnClockIn'), bOut=$('btnClockOut');
   if(!bIn || !bOut) return;
@@ -1446,9 +1465,22 @@ async function syncMonthlyBuffer(){
 /* ════════════════════════════════════════
    打卡
 ════════════════════════════════════════ */
+function setClockBtnBusy(btn){
+  if(!btn) return;
+  if(!btn.dataset.origHtml) btn.dataset.origHtml=btn.innerHTML;
+  btn.classList.add('busy');
+  btn.innerHTML='<span class="btn-spin">⏳</span><span>打卡中…</span>';
+}
+function restoreClockBtnHtml(btn){
+  if(!btn) return;
+  btn.classList.remove('busy');
+  if(btn.dataset.origHtml){ btn.innerHTML=btn.dataset.origHtml; delete btn.dataset.origHtml; }
+}
 async function doClockAction(type){
   const btnIn=$('btnClockIn'), btnOut=$('btnClockOut');
+  const activeBtn=type==='in'?btnIn:btnOut;
   if(btnIn)btnIn.disabled=true; if(btnOut)btnOut.disabled=true; // 送出期間先鎖住兩顆，避免連點
+  setClockBtnBusy(activeBtn); // 立刻給視覺回饋，避免員工誤以為沒反應而連點兩次
   if(type==='in'){
     // 關鍵修復：打卡當下強制重新核對本月真實遲到總量，不信任開機時可能還沒跑完的背景同步
     // （避免手速快/網路慢時，用到預設值0，導致緩衝計算漏掉本月稍早的大遲到）
@@ -1488,6 +1520,7 @@ async function doClockAction(type){
     });
     toast(`下班打卡 ${ts}（${sh.name}）`,'ok');
   }
+  restoreClockBtnHtml(activeBtn); // 流程結束，還原按鈕文字
   renderBuffer();renderSalaryPage();
   enableBtn(); // 依最新狀態重新開關兩顆按鈕
   setTimeout(getGPS,400);
