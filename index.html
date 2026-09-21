@@ -410,10 +410,10 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
   <div class="f-grp"><label class="f-lbl">結束日期</label><input type="date" class="f-input" id="lvEnd" style="margin-bottom:0"/></div>
   <div class="f-grp"><label class="f-lbl">時段（半天以 4 小時計，僅限單日）</label>
     <select class="f-input" id="lvDayPart" style="margin-bottom:0" onchange="$('lvCustomWrap').style.display=this.value==='custom'?'block':'none'">
-      <option value="full">全天（8 小時）</option>
+      <option value="full" id="lvDayPartFull">全天（8 小時）</option>
       <option value="am">上半天 09:00–13:00（4 小時）</option>
       <option value="pm">下半天 14:00–18:00（4 小時）</option>
-      <option value="custom">自訂時數（其他，例如補休 1.5 小時）</option>
+      <option value="custom" id="lvDayPartCustom">自訂時數（其他，例如補休 1.5 小時）</option>
     </select>
   </div>
   <div class="f-grp" id="lvCustomWrap" style="display:none"><label class="f-lbl">自訂時數（小時，可填小數）</label>
@@ -421,7 +421,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
   </div>
   <div class="f-grp"><label class="f-lbl">事由（選填）</label><textarea class="f-textarea" id="lvReason" placeholder="例：感冒就醫、家庭事務…"></textarea></div>
   <div class="f-grp" id="lvProofWrap" style="display:none">
-    <label class="f-lbl">證明文件照片（病假必附）<span class="f-req">*</span></label>
+    <label class="f-lbl" id="lvProofLabel">證明文件照片（病假必附）<span class="f-req">*</span></label>
     <div class="photo-upload" id="lvPhotoBox">
       <input type="file" accept="image/*" capture="environment" onchange="handleLvPhoto(this)" id="lvPhotoInput"/>
       <div id="lvPhotoPlaceholder">📷 點擊拍照或上傳（診斷證明／掛號收據）</div>
@@ -736,7 +736,7 @@ const LEAVE_TYPES = [
   {key:'menstrual',name:'生理假',emoji:'🌸',note:'', requireProof:false,yearLimit:null,monthlyCap:null},
   {key:'personal', name:'事假',  emoji:'📝',note:'', requireProof:false,yearLimit:null,monthlyCap:null},
   {key:'comp',     name:'補休',  emoji:'🔁',note:'', requireProof:false,yearLimit:null,monthlyCap:null},
-  // {key:'checkup',name:'產檢假',emoji:'🤰',note:'需證明',requireProof:true,yearLimit:null,monthlyCap:null}, // 7天全薪(性平法§15)，需要時取消註解即可啟用
+  {key:'checkup',  name:'產檢假',emoji:'🤰',note:'需證明',requireProof:true,yearLimit:null,monthlyCap:null}, // 14個半天(7天)全薪(性平法§15)，需 employees.prenatal_enabled=true 才會顯示於請假頁
   // {key:'funeral',name:'喪假',emoji:'🕯️',note:'全薪',requireProof:true,yearLimit:8,monthlyCap:null},
   // {key:'marriage',name:'婚假',emoji:'💍',note:'全薪',requireProof:true,yearLimit:8,monthlyCap:null},
 ];
@@ -850,6 +850,8 @@ async function loadEmployees() {
         systemRole: e.system_role || 'staff',
         employeeType: e.employee_type || 'full_time',
         remotePunch: e.remote_punch || false,
+        prenatalEnabled: !!e.prenatal_enabled,
+        prenatalUsed: e.prenatal_used || 0,
       }));
       console.log('員工資料載入成功：', S.employees.length, '人');
       renderEmpList();
@@ -961,6 +963,8 @@ async function loadLeaves(empId) {
           requireProof: r.require_proof,
           empId: r.emp_id,
           empName: emp?.name || r.emp_id,
+          subsidyEligible: !!r.subsidy_eligible,
+          subsidyHalfDays: r.subsidy_half_days ? Number(r.subsidy_half_days) : 0,
         };
       });
       renderLeaveRecs();
@@ -1196,6 +1200,10 @@ function renderShiftCard(ds){
    員工看到：遲到X分、超出X分（不看金額）
    行政/會計/老闆看到：全部含金額
 ════════════════════════════════════════ */
+// 產檢假為全薪假，當天不列入遲到判定／月緩衝／每分鐘扣款
+function isPrenatalExemptDay(empId, dateStr){
+  return S.leaveRecords.some(r=>r.empId===empId && r.type==='checkup' && r.status==='approved' && r.start<=dateStr && r.end>=dateStr);
+}
 function calcLate(t,sh){
   const nowM=t.getHours()*60+t.getMinutes();
   const startM=sh.startH*60+(sh.startM||0);
@@ -1451,7 +1459,8 @@ async function syncMonthlyBuffer(){
     });
     const GRACE = '09:30';
     let totalLateMins = 0;
-    Object.values(days).forEach(t=>{
+    Object.entries(days).forEach(([ds,t])=>{
+      if(isPrenatalExemptDay(u.empId, ds)) return; // 產檢假半天不計入遲到緩衝
       if(t > GRACE){
         const gp=[9,30], tp=t.split(':').map(Number);
         totalLateMins += (tp[0]*60+tp[1]) - (gp[0]*60+gp[1]);
@@ -1490,7 +1499,10 @@ async function doClockAction(type){
   const sh=getShift();
   const near=OFFICES.filter(o=>o.lat).map(o=>({o,d:hav(S.gps?.la||0,S.gps?.lo||0,o.lat,o.lng)})).sort((a,b)=>a.d-b.d)[0];
   if(type==='in'){
-    const c=calcLate(now,sh);
+    // 產檢假當天（上／下半天）不列入遲到判定：以「準時到班」計算，避免因半天假造成的較晚到班被誤判遲到扣款
+    const c=isPrenatalExemptDay(S.users[S.role].empId,today())
+      ? calcLate(new Date(now.getFullYear(),now.getMonth(),now.getDate(),sh.startH,sh.startM||0),sh)
+      : calcLate(now,sh);
     S.clockedIn=true;S.inTime=ts;S.inDate=today();
     if(c.usedBuf>0)S.buf.usedMins+=c.usedBuf;
     if(c.overMins>0)S.buf.deductions.push({date:S.inDate,shift:sh.name,lateMins:c.lateMins,usedBuf:c.usedBuf,overMins:c.overMins,penalty:c.penalty});
@@ -1787,29 +1799,54 @@ function empBalStr(e){
   const b=calcLeaveBalance(e.id,e.hireDate);
   return `特休剩 ${fmtDaysH(b.annualRemainH)}／共 ${b.entitle} 天｜補休剩 ${b.compRemainH} 小時`;
 }
+function prenatalRemainHalf(emp){
+  return Math.max(0,14-((emp&&emp.prenatalUsed)||0));
+}
+// 依核准前已用的半天數，切分本次請假中「公司負擔」（第1~10個半天）與
+// 「可申請勞保局薪資補助」（第11~14個半天＝第6、7天）的半天數
+function calcPrenatalSubsidy(usedBefore,halfDays){
+  const startIdx=usedBefore, endIdx=usedBefore+halfDays;
+  const subsidyHalfDays=Math.max(0,Math.min(endIdx,14)-Math.max(startIdx,10));
+  return {subsidyHalfDays, subsidyEligible:subsidyHalfDays>0, companyHalfDays:halfDays-subsidyHalfDays};
+}
 function renderLeaveGrid(){
   const u=S.users[S.role];
+  const emp=S.employees.find(x=>x.id===u.empId);
   const bal=calcLeaveBalance(u.empId,u.hireDate);
-  $('leaveGrid').innerHTML=LEAVE_TYPES.map(lt=>{
+  const visibleTypes=LEAVE_TYPES.filter(lt=>lt.key!=='checkup'||(emp&&emp.prenatalEnabled));
+  $('leaveGrid').innerHTML=visibleTypes.map(lt=>{
     let extra='';
     if(lt.key==='annual')extra=`<div class="lc-note" style="color:${bal.annualRemainH>0?'var(--green)':'var(--orange)'};font-weight:900">剩 ${fmtDaysH(bal.annualRemainH)}</div>`;
     if(lt.key==='comp')extra=`<div class="lc-note" style="color:${bal.compRemainH>0?'var(--green)':'var(--orange)'};font-weight:900">剩 ${bal.compRemainH} 小時</div>`;
     if(lt.key==='checkup'){
-      const usedH=S.leaveRecords.filter(r=>r.empId===u.empId&&r.type==='checkup'&&r.status==='approved').reduce((t,r)=>t+weekdaysBetween(r.start,r.end)*((r.dayPart==='am'||r.dayPart==='pm')?4:8),0);
-      const remH=Math.max(0,56-usedH);
-      extra=`<div class="lc-note" style="color:${remH>0?'var(--green)':'var(--orange)'};font-weight:900">剩 ${fmtDaysH(remH)}／共 7 天</div>`;
+      const remHalf=prenatalRemainHalf(emp);
+      extra=`<div class="lc-note" style="color:${remHalf>0?'var(--green)':'var(--orange)'};font-weight:900">剩 ${remHalf} 個半天／共 14</div>`;
     }
     return `<div class="leave-card ${lt.key===S.leaveType?'sel':''}" onclick="selectLeave('${lt.key}')">
       <div class="lc-emoji">${lt.emoji}</div><div class="lc-name">${lt.name}</div>
       ${lt.requireProof?`<div class="lc-note">需證明</div>`:''}${extra}
     </div>`;
   }).join('');
+  // 若目前選取的假別已不在可見清單（例如產檢假被關閉），改選第一個可見假別
+  if(!visibleTypes.some(lt=>lt.key===S.leaveType)&&visibleTypes.length){
+    selectLeave(visibleTypes[0].key);
+  }
 }
 function selectLeave(k){
   S.leaveType=k;renderLeaveGrid();
   const lt=LEAVE_TYPES.find(x=>x.key===k);
   $('proofBanner').style.display=lt?.requireProof?'flex':'none';
   $('proofNote').style.display=lt?.requireProof?'block':'none';
+  $('lvProofWrap').style.display=lt?.requireProof?'block':'none';
+  const proofLabelText={sick:'證明文件照片（病假必附）',checkup:'證明文件照片（媽媽手冊蓋章頁或產檢就診證明，必附）'};
+  if($('lvProofLabel'))$('lvProofLabel').innerHTML=(proofLabelText[k]||'證明文件照片')+'<span class="f-req">*</span>';
+  // 產檢假單位固定為半天：隱藏「全天」「自訂時數」選項，並鎖定為上／下半天
+  const isCheckup=k==='checkup';
+  const dpFull=$('lvDayPartFull'), dpCustom=$('lvDayPartCustom'), dp=$('lvDayPart');
+  if(dpFull){dpFull.hidden=isCheckup;dpFull.disabled=isCheckup;}
+  if(dpCustom){dpCustom.hidden=isCheckup;dpCustom.disabled=isCheckup;}
+  if(isCheckup&&dp&&(dp.value==='full'||dp.value==='custom')){dp.value='am';}
+  if(isCheckup)$('lvCustomWrap').style.display='none';
 }
 function submitLeave(){
   const start=$('lvStart').value,end=$('lvEnd').value,reason=$('lvReason').value.trim();
@@ -1820,14 +1857,19 @@ function submitLeave(){
   console.log('請假申請：empId=', u.empId, 'role=', S.role, 'type=', S.leaveType);
   if(!u.empId){toast('身份識別失敗，請重新開啟系統','err');return;}
   const dayPart=$('lvDayPart')?$('lvDayPart').value:'full';
-  if(dayPart!=='full'&&start!==end){toast('半天或自訂時數僅限單日，跨日請選全天','err');return;}
+  // 產檢假固定以半天為單位，且可連續選多天（每天各算 1 個半天），不受「半天僅限單日」限制
+  if(S.leaveType==='checkup'&&dayPart!=='am'&&dayPart!=='pm'){toast('產檢假僅能選上半天或下半天','err');return;}
+  if(dayPart!=='full'&&start!==end&&S.leaveType!=='checkup'){toast('半天或自訂時數僅限單日，跨日請選全天','err');return;}
   let customHours=null;
   if(dayPart==='custom'){
     customHours=parseFloat($('lvCustomHours').value);
     if(!customHours||customHours<=0||customHours>8){toast('請填自訂時數（0.5～8 小時）','err');return;}
   }
-  // 需證明的假別（病假）必須附照片
-  if(lt.requireProof&&!S.lvPhotoDataUrl){toast('此假別需上傳證明照片（診斷證明/掛號收據）','err');return;}
+  // 需證明的假別（病假／產檢假）必須附照片
+  if(lt.requireProof&&!S.lvPhotoDataUrl){
+    toast(S.leaveType==='checkup'?'產檢假需上傳媽媽手冊蓋章頁或產檢就診證明':'此假別需上傳證明照片（診斷證明/掛號收據）','err');
+    return;
+  }
   // 申請時限規則檢查（違反時警告並標注，由主管特別核准）
   let ruleFlag='';
   const todayD=new Date();todayD.setHours(0,0,0,0);
@@ -1850,6 +1892,12 @@ function submitLeave(){
   if(S.leaveType==='comp'){
     const bal=calcLeaveBalance(u.empId,u.hireDate);
     if(reqH>bal.compRemainH&&!confirm(`⚠️ 補休僅剩 ${bal.compRemainH} 小時，本次申請 ${reqH} 小時已超過額度。\n仍要送出申請嗎？`))return;
+  }
+  if(S.leaveType==='checkup'){
+    const emp=S.employees.find(x=>x.id===u.empId);
+    const remainHalf=prenatalRemainHalf(emp);
+    const reqHalf=reqH/4;
+    if(reqHalf>remainHalf&&!confirm(`⚠️ 產檢假僅剩 ${remainHalf} 個半天，本次申請 ${reqHalf} 個半天已超過額度。\n仍要送出申請嗎？`))return;
   }
   // 存到後端
   saveLeave(u.empId, S.leaveType, start, end, reason, lt.requireProof, dayPart, customHours, S.lvPhotoDataUrl).then(saved => {
@@ -1912,6 +1960,7 @@ function renderLeaveRecs(){
         <div class="lr-type">${r.name}</div>
         <div class="lr-dates">${r.start} ～ ${r.end}${r.dayPart==='am'?'｜上半天':r.dayPart==='pm'?'｜下半天':r.dayPart==='custom'?`｜${r.customHours||''} 小時`:''}${r.reason?' ｜'+r.reason:''}${r.proofPhoto?` ｜<span style="color:var(--green);font-weight:900" onclick="event.stopPropagation();showProof(${typeof r.id==='string'?`'${r.id}'`:r.id})">📎 看證明</span>`:''}</div>
         ${r.requireProof&&r.status==='approved'?`<div class="lr-proof">📎 請補交就醫證明給 HR</div>`:''}
+        ${r.type==='checkup'&&r.subsidyEligible?`<div class="lr-proof" style="color:var(--gold)">🏛️ 可申請勞保局薪資補助（${r.subsidyHalfDays} 個半天）</div>`:''}
         ${actions}
       </div>
       <div class="lr-status ${r.status}">${sMap[r.status]}</div>
@@ -1920,8 +1969,32 @@ function renderLeaveRecs(){
 }
 async function approveLeave(id){
   if(!ROLES[S.role].canApproveLeave){toast('只有老闆可核准','err');return;}
+  const rec=S.leaveRecords.find(r=>r.id===id);
   try{ await sbPatch('leave_requests', id, {status:'approved'}); }catch(e){console.error(e);}
   S.leaveRecords=S.leaveRecords.map(r=>r.id===id?Object.assign({},r,{status:'approved'}):r);
+  // 產檢假：核准後累加已用半天數（上／下半天各算 1 個，連續多天依天數累加），
+  // 並依累計順序標記本次請假中哪些半天落在第 11~14 個半天（第 6、7 天，可申請勞保局補助）
+  if(rec&&rec.type==='checkup'){
+    const emp=S.employees.find(x=>x.id===rec.empId);
+    if(emp){
+      const halfDays=weekdaysBetween(rec.start,rec.end);
+      const usedBefore=emp.prenatalUsed||0;
+      const newUsed=usedBefore+halfDays;
+      const {subsidyHalfDays,subsidyEligible}=calcPrenatalSubsidy(usedBefore,halfDays);
+      try{ await sbPatch('leave_requests', id, {subsidy_eligible:subsidyEligible, subsidy_half_days:subsidyHalfDays}); }
+      catch(e){ console.error('產檢假補助標記寫入失敗：', e); }
+      S.leaveRecords=S.leaveRecords.map(r=>r.id===id?Object.assign({},r,{subsidyEligible,subsidyHalfDays}):r);
+      const saved=await updateEmployee(emp.id,{prenatal_used:newUsed});
+      if(saved){
+        S.employees=S.employees.map(x=>x.id===emp.id?Object.assign({},x,{prenatalUsed:newUsed}):x);
+        renderEmpList();
+      }
+      // 累計用滿 14 個半天（7天）：通知 owner 與會計備妥文件申請勞保局補助
+      if(usedBefore<14 && newUsed>=14){
+        sendLineMsg(`🏛️ ${emp.name} 產檢假已用畢，第 6、7 天共 2 天可向勞保局申請薪資補助，請備妥文件送件。`);
+      }
+    }
+  }
   renderLeaveRecs();toast('✅ 假單已核准','ok');
 }
 async function rejectLeave(id){
@@ -1932,6 +2005,7 @@ async function rejectLeave(id){
 }
 async function deleteLeave(id){
   if(!ROLES[S.role].canDeleteLeave){toast('無權限','err');return;}
+  const rec=S.leaveRecords.find(r=>r.id===id);
   try{
     const res = await fetch(SB_URL+'/rest/v1/leave_requests?id=eq.'+id, {
       method:'DELETE',
@@ -1945,6 +2019,19 @@ async function deleteLeave(id){
     console.log('DELETE 結果：', res.status, res.statusText);
     if(res.ok){
       S.leaveRecords=S.leaveRecords.filter(r=>r.id!==id);
+      // 產檢假：取消已核准假單時，退回已扣的半天額度
+      if(rec&&rec.type==='checkup'&&rec.status==='approved'){
+        const emp=S.employees.find(x=>x.id===rec.empId);
+        if(emp){
+          const halfDays=weekdaysBetween(rec.start,rec.end);
+          const newUsed=Math.max(0,(emp.prenatalUsed||0)-halfDays);
+          const saved=await updateEmployee(emp.id,{prenatal_used:newUsed});
+          if(saved){
+            S.employees=S.employees.map(x=>x.id===emp.id?Object.assign({},x,{prenatalUsed:newUsed}):x);
+            renderEmpList();
+          }
+        }
+      }
       renderLeaveRecs();
       toast('🗑️ 假單已取消','warn');
     } else {
@@ -2161,7 +2248,7 @@ function renderEmpList(){
         <div class="emp-role">${e.role}</div>
         <div class="emp-hire">到職：${e.hireDate}｜${empBalStr(e)}｜${e.lineId?'🟢 LINE已綁定':'⚪ LINE未綁定'}</div>
         <div class="emp-btns">
-          ${role.canAddEmp?`<button class="emp-btn" style="background:var(--mist);color:var(--ink)" onclick="bindLineId('${e.id}')">🔗 ${e.lineId?'重新綁定':'綁定LINE'}</button><button class="emp-btn" style="background:${e.remotePunch?'var(--green-lt)':'var(--mist)'};color:var(--ink)" onclick="toggleRemote('${e.id}')">🛰️ 外勤${e.remotePunch?'：開':'：關'}</button>`:''}
+          ${role.canAddEmp?`<button class="emp-btn" style="background:var(--mist);color:var(--ink)" onclick="bindLineId('${e.id}')">🔗 ${e.lineId?'重新綁定':'綁定LINE'}</button><button class="emp-btn" style="background:${e.remotePunch?'var(--green-lt)':'var(--mist)'};color:var(--ink)" onclick="toggleRemote('${e.id}')">🛰️ 外勤${e.remotePunch?'：開':'：關'}</button><button class="emp-btn" style="background:${e.prenatalEnabled?'var(--green-lt)':'var(--mist)'};color:var(--ink)" onclick="togglePrenatal('${e.id}')">🤰 產檢假${e.prenatalEnabled?'：開':'：關'}</button>`:''}
           ${role.canEditSalary?`<button class="emp-btn salary" onclick="openSalaryModal('${e.id}')">💰 薪資設定</button>`:''}
           ${role.canDisableEmp&&e.status==='active'?`<button class="emp-btn disable" onclick="disableEmp('${e.id}')">停用</button>`:''}
           ${role.canDisableEmp&&e.status!=='active'?`<button class="emp-btn enable" onclick="enableEmp('${e.id}')">啟用</button>`:''}
@@ -2209,6 +2296,23 @@ async function toggleRemote(id){
     S.employees=S.employees.map(x=>x.id===id?Object.assign({},x,{remotePunch:nv}):x);
     renderEmpList();
     toast(nv?`🛰️ 已開放「${emp.name}」外勤打卡`:`已恢復「${emp.name}」須在公司範圍打卡`,'ok');
+  } else toast('儲存失敗，請重試','err');
+}
+async function togglePrenatal(id){
+  if(!ROLES[S.role].canAddEmp){toast('無權限','err');return;}
+  const emp=S.employees.find(x=>x.id===id); if(!emp)return;
+  const nv=!emp.prenatalEnabled;
+  if(nv){
+    if(!confirm(`為「${emp.name}」開啟產檢假？\n開啟後將獲得 14 個半天（7天）產檢假額度。`))return;
+  } else {
+    if(!confirm(`關閉「${emp.name}」的產檢假？\n將清除已用額度紀錄，請假頁將不再顯示此假別。`))return;
+  }
+  // 開啟／關閉都重置已用額度：開啟＝從 14 個半天重新起算；關閉＝清除紀錄
+  const saved=await updateEmployee(id,{prenatal_enabled:nv, prenatal_used:0});
+  if(saved){
+    S.employees=S.employees.map(x=>x.id===id?Object.assign({},x,{prenatalEnabled:nv,prenatalUsed:0}):x);
+    renderEmpList();
+    toast(nv?`🤰 已為「${emp.name}」開啟產檢假（14個半天）`:`已關閉「${emp.name}」的產檢假`,nv?'ok':'warn');
   } else toast('儲存失敗，請重試','err');
 }
 async function bindLineId(id){
@@ -2290,6 +2394,7 @@ function calcMonthlyStats(empId, year, month){
   Object.entries(days).forEach(function(entry){
     const d=entry[0]; const v=entry[1];
     if(!v.in) return;
+    if(isPrenatalExemptDay(empId,d)) return; // 產檢假半天不計入遲到／扣薪
     if(v.in>GRACE){
       const gh=9,gm=30,pts=v.in.split(':').map(Number);
       const late=(pts[0]*60+pts[1])-(gh*60+gm);
@@ -2617,7 +2722,8 @@ function renderAllReport(role){
       '<div class="comp-item" style="border-top:1.5px solid var(--gold);margin-top:6px;padding-top:6px"><span style="font-weight:900">全員合計</span><span style="font-weight:900;color:var(--teal)">'+fmtO(expTotalOwner)+'</span></div>':
       '<div style="color:#bbb;font-size:13px">本月尚無已核准代墊</div>')+'</div></div>'+
       (remoteHtml?'<div class="section"><div class="sec-head">📍 外勤打卡地點抽查</div><div style="padding:6px 14px">'+remoteHtml+'</div></div>':'')+
-      '<div class="section"><div class="sec-head">🏆 全勤名單</div><div style="padding:10px 14px">'+renderPerfectAttendanceHTML(S_rptYear,S_rptMonth)+'</div></div>';
+      '<div class="section"><div class="sec-head">🏆 全勤名單</div><div style="padding:10px 14px">'+renderPerfectAttendanceHTML(S_rptYear,S_rptMonth)+'</div></div>'+
+      renderPrenatalSubsidySection();
     return;
   }
   const rows=actEmps.map(function(e){const st=calcMonthlyStats(e.id,S_rptYear,S_rptMonth);const isPartTime=e.role==='工讀生';const totalH=(st.totalWorkMins/60).toFixed(1);return {e,st,isPartTime,totalH};});
@@ -2653,7 +2759,47 @@ function renderAllReport(role){
     (expTotal>0?'<div class="section"><div class="sec-head">💳 本月代墊彙整</div><div style="padding:6px 14px">'+expRows+
     '<div class="comp-item" style="border-top:1.5px solid var(--gold);margin-top:6px;padding-top:6px"><span style="font-weight:900">本月代墊總計</span><span style="font-weight:900;color:var(--teal)">'+fmt(expTotal)+'</span></div></div></div>':'')+
     (locHtml?'<div class="section"><div class="sec-head">📍 外勤打卡地點明細</div><div style="padding:6px 14px">'+locHtml+'</div></div>':'')+
-    '<div class="section"><div class="sec-head">🏆 全勤名單</div><div style="padding:10px 14px">'+renderPerfectAttendanceHTML(S_rptYear,S_rptMonth)+'</div></div>';
+    '<div class="section"><div class="sec-head">🏆 全勤名單</div><div style="padding:10px 14px">'+renderPerfectAttendanceHTML(S_rptYear,S_rptMonth)+'</div></div>'+
+    renderPrenatalSubsidySection();
+}
+// 產檢假補助申請清單：列出全部（不限本月）已核准且落在第 11~14 個半天（第 6、7 天）的紀錄，
+// 供 owner／行政主管／會計向勞保局申請薪資補助時使用
+function getPrenatalSubsidyList(){
+  return S.leaveRecords.filter(function(r){return r.type==='checkup'&&r.status==='approved'&&r.subsidyEligible;})
+    .map(function(r){return {r:r, emp:S.employees.find(function(e){return e.id===r.empId;})};})
+    .sort(function(a,b){return (a.r.start||'').localeCompare(b.r.start||'');});
+}
+function renderPrenatalSubsidySection(){
+  const list=getPrenatalSubsidyList();
+  const rowsHtml=list.length?list.map(function(x){
+    const r=x.r, emp=x.emp;
+    const halfDays=weekdaysBetween(r.start,r.end);
+    return '<div class="comp-item" style="align-items:flex-start"><div><div style="font-weight:700">'+(emp?emp.name:r.empId)+'</div>'+
+      '<div style="font-size:11px;color:#999">'+r.start+(r.start!==r.end?' ～ '+r.end:'')+'・共 '+halfDays+' 個半天・可補助 '+r.subsidyHalfDays+' 個半天</div></div>'+
+      (r.proofPhoto?'<span style="color:var(--green);font-weight:900;font-size:11px;cursor:pointer;white-space:nowrap" onclick="showProof('+(typeof r.id==='string'?"'"+r.id+"'":r.id)+')">📎 看附件</span>':'<span style="color:#ccc;font-size:11px;white-space:nowrap">無附件</span>')+
+      '</div>';
+  }).join(''):'<div style="color:#bbb;font-size:13px">目前無可申請補助的產檢假紀錄</div>';
+  return '<div class="section"><div class="sec-head">🏛️ 產檢假補助申請清單（第 6、7 天，全部未限本月）'+
+    (list.length?'<button onclick="exportPrenatalSubsidyCsv()" style="float:right;font-size:11px;padding:3px 10px;border:none;border-radius:8px;background:var(--gold);color:var(--dark);font-weight:700;cursor:pointer">⬇️ 匯出 CSV</button>':'')+
+    '</div><div style="padding:6px 14px">'+rowsHtml+'</div></div>';
+}
+function exportPrenatalSubsidyCsv(){
+  const list=getPrenatalSubsidyList();
+  if(!list.length){toast('目前無可匯出的補助紀錄','warn');return;}
+  const header=['員工','開始日期','結束日期','半天數','可補助半天數(第6、7天)','附件'];
+  const rows=list.map(function(x){
+    const r=x.r, emp=x.emp;
+    return [emp?emp.name:r.empId, r.start, r.end, weekdaysBetween(r.start,r.end), r.subsidyHalfDays, r.proofPhoto?'有':'無'];
+  });
+  const csv='﻿'+[header].concat(rows).map(function(row){
+    return row.map(function(v){return '"'+String(v).replace(/"/g,'""')+'"';}).join(',');
+  }).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download='產檢假補助申請清單_'+today()+'.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
  
 function openSalaryModal(empId){
