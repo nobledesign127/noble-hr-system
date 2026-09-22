@@ -339,7 +339,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
  
   <!-- 打卡紀錄 -->
   <div class="section">
-    <div class="sec-head">📋 今日打卡紀錄</div>
+    <div class="sec-head">📋 今日打卡紀錄<span id="logDateLabel" style="font-weight:400;color:#999;font-size:11px;margin-left:6px"></span></div>
     <div class="log-list" id="logList"><div class="empty">尚無打卡紀錄</div></div>
   </div>
  
@@ -368,6 +368,11 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
   <!-- 補卡紀錄與審核（缺漏補上） -->
   <div class="section">
     <div class="sec-head">🕐 補卡申請紀錄</div>
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 14px 8px">
+      <button onclick="changeMkMonth(-1)" style="border:none;background:var(--mist);border-radius:8px;padding:6px 14px;font-size:16px;cursor:pointer">‹</button>
+      <div id="mkMonthLabel" style="flex:1;text-align:center;font-size:13px;font-weight:900;color:var(--ink)"></div>
+      <button onclick="changeMkMonth(1)" style="border:none;background:var(--mist);border-radius:8px;padding:6px 14px;font-size:16px;cursor:pointer">›</button>
+    </div>
     <div class="log-list" id="mkList"><div class="empty">尚無補卡申請</div></div>
   </div>
 </div>
@@ -499,6 +504,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 <div class="page" id="page-expense">
   <div class="pg-title">代墊款申請</div>
   <div class="pg-sub">請當天或隔天申請，並附上照片</div>
+  <div id="expMonthSummary" style="margin:0 14px 12px;padding:12px 14px;background:var(--gold-lt);border-radius:12px;font-size:13px;font-weight:900;color:var(--ink)"></div>
   <div class="section">
     <div class="form-pad">
       <!-- 案場 & 分類 -->
@@ -561,7 +567,12 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
     </div>
   </div>
   <div class="section">
-    <div class="sec-head">我的代墊紀錄 <span id="myExpTotal"></span></div>
+    <div class="sec-head">我的代墊紀錄</div>
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 14px 8px">
+      <button onclick="changeExpMonth(-1)" style="border:none;background:var(--mist);border-radius:8px;padding:6px 14px;font-size:16px;cursor:pointer">‹</button>
+      <div id="expMonthLabel" style="flex:1;text-align:center;font-size:13px;font-weight:900;color:var(--ink)"></div>
+      <button onclick="changeExpMonth(1)" style="border:none;background:var(--mist);border-radius:8px;padding:6px 14px;font-size:16px;cursor:pointer">›</button>
+    </div>
     <div id="myExpList"><div class="empty">尚無申請紀錄</div></div>
   </div>
 </div>
@@ -705,19 +716,19 @@ const ROLES = {
   owner:      { label:'老闆',    color:'var(--gold)',  tc:'var(--dark)',
     canApproveLeave:true, canDeleteLeave:true, canMakeup:true, canEditSchedule:true,
     canAddEmp:true, canDisableEmp:true, canViewAll:true,
-    canViewSalary:true, canEditSalary:true, canViewExp:true, canApproveExp:true, canMarkPaid:true },
+    canViewSalary:true, canEditSalary:true, canApproveExp:true, canMarkPaid:true },
   admin:      { label:'行政主管', color:'#60A5FA', tc:'var(--dark)',
     canApproveLeave:false, canDeleteLeave:true, canMakeup:true, canEditSchedule:true,
     canAddEmp:true, canDisableEmp:false, canViewAll:true,
-    canViewSalary:false, canEditSalary:false, canViewExp:true, canApproveExp:true, canMarkPaid:false },
+    canViewSalary:false, canEditSalary:false, canApproveExp:true, canMarkPaid:false },
   accounting: { label:'會計',    color:'#34D399', tc:'var(--dark)',
     canApproveLeave:false, canDeleteLeave:false, canMakeup:false, canEditSchedule:false,
     canAddEmp:true, canDisableEmp:false, canViewAll:true,
-    canViewSalary:true, canEditSalary:true, canViewExp:true, canApproveExp:true, canMarkPaid:true },
+    canViewSalary:true, canEditSalary:true, canApproveExp:true, canMarkPaid:true },
   staff:      { label:'員工',    color:'#A78BFA', tc:'var(--dark)',
     canApproveLeave:false, canDeleteLeave:false, canMakeup:false, canEditSchedule:false,
     canAddEmp:false, canDisableEmp:false, canViewAll:false,
-    canViewSalary:false, canEditSalary:false, canViewExp:false, canApproveExp:false, canMarkPaid:false },
+    canViewSalary:false, canEditSalary:false, canApproveExp:false, canMarkPaid:false },
 };
  
 /* ════════════════════════════════════════
@@ -1246,6 +1257,7 @@ function tick(){
   if(!S.clockedIn&&!S.inTime)updateBannerLive(n);
 }
 tick();setInterval(tick,1000);
+setLogDateLabel();
  
 function updateBannerLive(n){
   const sh=getShift(); const b=$('lateBanner');
@@ -1383,6 +1395,7 @@ async function syncTodayClockStatus(){
       const loc = c.office_id==='remote' ? '外勤' : (o ? o.name : (c.office_id==='makeup' ? '補卡核准' : '外勤'));
       return { type:c.type, action: c.type==='in'?'上班打卡':'下班打卡', loc, time:t, c:null, sh:null };
     });
+    setLogDateLabel();
     if($('logList')) $('logList').innerHTML = S.logs.length ? S.logs.map(l=>{
       return `<div class="log-item">
         <div class="log-dot ${l.type==='in'?'in':'out'}"></div>
@@ -1577,8 +1590,13 @@ function renderBuffer(){
 /* ════════════════════════════════════════
    打卡紀錄
 ════════════════════════════════════════ */
+function setLogDateLabel(){
+  const n=new Date(), el=$('logDateLabel');
+  if(el) el.textContent='（'+n.getFullYear()+'/'+pad(n.getMonth()+1)+'/'+pad(n.getDate())+'）';
+}
 function addLog(type,action,loc,time,c,sh){
   S.logs.unshift({type,action,loc,time,c,sh});
+  setLogDateLabel();
   $('logList').innerHTML=S.logs.map(l=>{
     let badge='';
     if(l.type==='in'&&l.c){
@@ -1612,11 +1630,22 @@ async function loadMakeups(){
     }
   }catch(e){console.error('loadMakeups 錯誤：',e);}
 }
+let S_mkMonth=new Date().getMonth();
+let S_mkYear=new Date().getFullYear();
+function changeMkMonth(dir){
+  S_mkMonth+=dir;
+  if(S_mkMonth>11){S_mkMonth=0;S_mkYear++;}
+  if(S_mkMonth<0){S_mkMonth=11;S_mkYear--;}
+  renderMakeupList();
+}
 function renderMakeupList(){
   const el=$('mkList'); if(!el)return;
   const role=ROLES[S.role]; const u=S.users[S.role];
-  // 老闆/行政主管看全部（才能審核），一般員工只看自己的
-  const list=role.canViewAll ? S.makeupRecords : S.makeupRecords.filter(m=>m.empId===u.empId);
+  if($('mkMonthLabel'))$('mkMonthLabel').textContent=S_mkYear+' 年 '+(S_mkMonth+1)+' 月';
+  const ym=S_mkYear+'-'+String(S_mkMonth+1).padStart(2,'0');
+  // 老闆/行政主管看全部（才能審核），一般員工只看自己的；並依選定月份篩選
+  const list=(role.canViewAll ? S.makeupRecords : S.makeupRecords.filter(m=>m.empId===u.empId))
+    .filter(m=>(m.date||'').startsWith(ym));
   const sorted=[...list].sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
   if(!sorted.length){ el.innerHTML='<div class="empty">尚無補卡申請</div>'; return; }
   const empName=id=>{ const e=S.employees.find(x=>x.id===id); return e?e.name:id; };
@@ -2029,7 +2058,10 @@ function renderLeaveRecs(){
     let actions='';
     if(role.canApproveLeave&&r.status==='pending')
       actions=`<div class="lr-actions"><button class="lr-btn approve" onclick="approveLeave(${r.id})">✅ 核准</button><button class="lr-btn reject" onclick="rejectLeave(${r.id})">❌ 拒絕</button></div>`;
-    else if(role.canDeleteLeave&&r.status==='approved')
+    // 已核准的假單只有老闆能取消；行政主管（canDeleteLeave）只能取消「待核准」的假單
+    else if(r.status==='approved'&&S.role==='owner')
+      actions=`<div class="lr-actions"><button class="lr-btn del" onclick="deleteLeave(${r.id})">🗑️ 取消假單</button></div>`;
+    else if(r.status==='pending'&&role.canDeleteLeave)
       actions=`<div class="lr-actions"><button class="lr-btn del" onclick="deleteLeave(${r.id})">🗑️ 取消假單</button></div>`;
     return `<div class="leave-rec ${r.status}">
       <div style="font-size:18px">${r.emoji}</div>
@@ -2084,6 +2116,11 @@ async function rejectLeave(id){
 async function deleteLeave(id){
   if(!ROLES[S.role].canDeleteLeave){toast('無權限','err');return;}
   const rec=S.leaveRecords.find(r=>r.id===id);
+  // 行政主管只能取消「待核准」的假單；已核准的假單只有老闆能取消
+  if(rec && rec.status==='approved' && S.role!=='owner'){
+    toast('已核准的假單只有老闆能取消','err');
+    return;
+  }
   try{
     const res = await fetch(SB_URL+'/rest/v1/leave_requests?id=eq.'+id, {
       method:'DELETE',
@@ -2221,15 +2258,26 @@ async function submitExpense(){
   sendLineMsg(`💳 代墊款申請通知\n\n員工：${u.name}\n案場：${caseName}\n分類：${catName}\n金額：NT$${amt.toLocaleString()}\n說明：${desc}${invoice?'\n發票：'+invoice:''}\n\n請至系統審核 👉\nhttps://liff.line.me/2010371976-U8wLomXx`);
   renderExpensePage();
 }
+let S_expMonth=new Date().getMonth();
+let S_expYear=new Date().getFullYear();
+function changeExpMonth(dir){
+  S_expMonth+=dir;
+  if(S_expMonth>11){S_expMonth=0;S_expYear++;}
+  if(S_expMonth<0){S_expMonth=11;S_expYear--;}
+  renderExpensePage();
+}
 function renderExpensePage(){
   const role=ROLES[S.role];const u=S.users[S.role];
-  const ym=today().slice(0,7);
-  // 員工自己：只看本月申請，且已核准/已撥款（已處理完成）的就從自己畫面移除
+  const ym=S_expYear+'-'+String(S_expMonth+1).padStart(2,'0');
+  if($('expMonthLabel'))$('expMonthLabel').textContent=S_expYear+' 年 '+(S_expMonth+1)+' 月';
+  // 員工自己：只看選定月份的申請，且已核准/已撥款（已處理完成）的就從自己畫面移除
   const mine=S.expenses.filter(e=>e.empId===u.empId && (e.date||'').startsWith(ym) && !['approved','paid'].includes(e.status));
-  const approvedTotal=S.expenses.filter(e=>e.empId===u.empId&&['approved','paid'].includes(e.status)&&(e.date||'').startsWith(ym)).reduce((s,e)=>s+e.amount,0);
-  $('myExpTotal').textContent=approvedTotal>0?`本月已核准 NT$${approvedTotal.toLocaleString()}`:'';
-  // 有 canViewAll 權限（老闆/行政主管/會計）看全部員工的代墊（含歷史），才能審核；員工只看本月待處理
-  const list=role.canViewAll?S.expenses:mine;
+  // 本月代墊合計：公司「目前仍積欠」的金額（已拒絕／已撥款不算積欠），不論身份都以目前登入者自己名下的資料計算
+  const owedList=S.expenses.filter(e=>e.empId===u.empId && (e.date||'').startsWith(ym) && !['paid','rejected'].includes(e.status));
+  const owedTotal=owedList.reduce((s,e)=>s+e.amount,0);
+  if($('expMonthSummary'))$('expMonthSummary').textContent=owedList.length?`本月代墊合計：NT$${owedTotal.toLocaleString()}（${owedList.length} 筆）`:'本月尚無代墊申請';
+  // 有 canViewAll 權限（老闆/行政主管/會計）看選定月份全部員工的代墊，才能審核；員工只看自己
+  const list=role.canViewAll?S.expenses.filter(e=>(e.date||'').startsWith(ym)):mine;
   $('myExpList').innerHTML=list.length?list.map(e=>expCard(e)).join(''):'<div class="empty">尚無申請紀錄</div>';
 }
 function expCard(e){
@@ -3065,7 +3113,7 @@ function renderOvertimePage(){
       </div>
     </div>`).join(''):'<div class="empty">尚無加班紀錄</div>';
  
-  // 老闆/行政：顯示待審核
+  // 加班核准目前只有老闆能做（approveOt 也是只認 canApproveLeave），這裡的顯示條件與其一致
   if(role.canApproveLeave||role.canAdminReview){
     $('allOtSection').style.display='block';
     const pending=S.overtimes.filter(o=>o.status==='pending');
@@ -3155,10 +3203,31 @@ async function initLIFF(){
     document.getElementById('roleSw').style.display='none';
     await liff.init({liffId:'2010371976-U8wLomXx'});
     if(!liff.isLoggedIn()){ liff.login(); return; }
- 
+
     const p = await liff.getProfile();
     const lineUserId = p.userId;
- 
+
+    // 安全防護①：登入成功後立刻清掉網址列的 code／state 等 LINE OAuth 一次性驗證參數，
+    // 避免使用者把網址複製分享出去，讓別人點開後被誤認成原本那個人的身分
+    try{
+      const url = new URL(window.location.href);
+      ['code','state','liffClientId','liffRedirectUri'].forEach(function(k){ url.searchParams.delete(k); });
+      history.replaceState(null, '', url.pathname + url.search + url.hash);
+    }catch(e){ console.log('清除網址驗證參數失敗', e); }
+
+    // 安全防護②：比對本機（localStorage）先前記錄的 LINE 身分，若跟這次登入取得的 userId 不同
+    // （例如這台裝置誤開了別人分享出去、還帶著驗證碼的網址），視為可疑，清空本機狀態並重新載入，
+    // 強制以正確的 LINE 身分重新走一次登入流程，避免被誤認成別人
+    const LOCAL_UID_KEY='nobleHrLineUid';
+    let cachedUid=null;
+    try{ cachedUid=localStorage.getItem(LOCAL_UID_KEY); }catch(e){}
+    if(cachedUid && cachedUid!==lineUserId){
+      try{ localStorage.clear(); sessionStorage.clear(); }catch(e){}
+      location.reload();
+      return;
+    }
+    try{ localStorage.setItem(LOCAL_UID_KEY, lineUserId); }catch(e){}
+
     const matched = S.employees.find(e => e.lineId === lineUserId);
     if(matched){
       const roleMap = {'老闆':'owner','行政主管':'admin','會計':'accounting'};
