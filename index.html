@@ -591,8 +591,9 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
     <button id="ckTab2" onclick="switchCkTab(2)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">📋 請假總覽</button>
     <button id="ckTab3" onclick="switchCkTab(3)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">🏆 全勤名單</button>
     <button id="ckTab4" onclick="switchCkTab(4)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">📅 每日明細</button>
+    <button id="ckTab5" onclick="switchCkTab(5)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">🌿 假期總覽</button>
   </div>
-  <div style="display:flex;align-items:center;gap:8px;margin:0 14px 10px">
+  <div id="ckMonthRow" style="display:flex;align-items:center;gap:8px;margin:0 14px 10px">
     <button onclick="changeCkMonth(-1)" style="border:none;background:var(--mist);border-radius:8px;padding:6px 14px;font-size:18px;cursor:pointer">‹</button>
     <div id="ckMonthLabel" style="flex:1;text-align:center;font-size:15px;font-weight:900;color:var(--ink)"></div>
     <button onclick="changeCkMonth(1)" style="border:none;background:var(--mist);border-radius:8px;padding:6px 14px;font-size:18px;cursor:pointer">›</button>
@@ -1165,6 +1166,14 @@ function setRole(r){
   renderSalaryPage(); renderExpensePage(); renderScheduleWeek();
   if(role.canAddEmp||role.canViewAll)renderEmpList();
   updateMkEmpSelect(); updateMkShiftSelect();
+  // 安全防護：若切換角色前正停留在對新角色已不可見的頁面（例如薪資頁），強制導回打卡頁，
+  // 避免測試用的角色切換器讓敏感內容（如薪資）殘留在畫面上
+  const activePage=document.querySelector('.page.active');
+  if(activePage){
+    const pageId=activePage.id.replace('page-','');
+    const navBtn=$('nav-'+pageId);
+    if(navBtn && navBtn.style.display==='none') switchPage('home');
+  }
   toast(`已切換：${role.label}`,'ok');
 }
  
@@ -1788,6 +1797,75 @@ function calcLeaveBalance(empId,hireDate){
   const compEarnedH=S.overtimes.filter(o=>o.empId===empId&&o.status==='approved'&&new Date(o.date)>=sixAgo).reduce((t,o)=>t+(Number(o.hours)||0),0);
   const compUsedH=S.leaveRecords.filter(r=>r.empId===empId&&r.type==='comp'&&r.status==='approved'&&new Date(r.start)>=sixAgo).reduce((t,r)=>t+recH(r),0);
   return {entitle,entitleH,usedAnnualH,annualRemainH:entitleH-usedAnnualH,compEarnedH,compUsedH,compRemainH:compEarnedH-compUsedH};
+}
+/* ── 假期總覽頁（管理者）專用：精確週年制分期計算 ──
+   規則：到職滿半年才有第一期（3天），有效期至滿1年週年日前一天；
+   滿1年起，之後每個週年日各自獨立起算一期，效期剛好 1 年，不與前一期重疊、不遞延、到期歸零 */
+function ymd(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function annualTierDays(y){ // y=0 代表到職滿半年～滿1年那一期；y>=1 代表第 y 個週年起的那一期
+  if(y===0)return 3;
+  if(y<2)return 7;
+  if(y<3)return 10;
+  if(y<5)return 14;
+  if(y<10)return 15;
+  return Math.min(15+(y-10),30);
+}
+function currentAnnualWindow(hireDate,asOf){
+  const hd=new Date(hireDate||'2024-01-15');
+  const half=new Date(hd);half.setMonth(half.getMonth()+6);
+  if(asOf<half)return null; // 未滿半年，尚無額度
+  const yr1=new Date(hd);yr1.setFullYear(yr1.getFullYear()+1);
+  if(asOf<yr1){
+    const end=new Date(yr1);end.setDate(end.getDate()-1);
+    return {start:half,end,days:annualTierDays(0)};
+  }
+  let y=1;
+  while(y<=80){
+    const s=new Date(hd);s.setFullYear(s.getFullYear()+y);
+    const eNext=new Date(hd);eNext.setFullYear(eNext.getFullYear()+y+1);
+    if(asOf<eNext){
+      const end=new Date(eNext);end.setDate(end.getDate()-1);
+      return {start:s,end,days:annualTierDays(y)};
+    }
+    y++;
+  }
+  return null;
+}
+function calcAnnualOverview(emp,asOf){
+  const win=currentAnnualWindow(emp.hireDate,asOf);
+  if(!win)return {noneYet:true};
+  const ws=ymd(win.start), we=ymd(win.end);
+  const partH=r=>r.dayPart==='custom'?(Number(r.customHours)||0):((r.dayPart==='am'||r.dayPart==='pm')?4:8);
+  const usedH=S.leaveRecords.filter(r=>r.empId===emp.id&&r.type==='annual'&&r.status==='approved'&&r.start>=ws&&r.start<=we)
+    .reduce((t,r)=>t+(r.dayPart==='custom'?(Number(r.customHours)||0):weekdaysBetween(r.start,r.end)*partH(r)),0);
+  const totalH=win.days*8;
+  return {noneYet:false,start:win.start,end:win.end,days:win.days,totalH,usedH,remainH:Math.max(0,totalH-usedH)};
+}
+function calcCompOverview(emp,asOf){
+  const sixAgo=new Date(asOf);sixAgo.setMonth(sixAgo.getMonth()-6);
+  const earns=S.overtimes.filter(o=>o.empId===emp.id&&o.status==='approved'&&new Date(o.date)>=sixAgo)
+    .map(o=>({date:o.date,hours:Number(o.hours)||0})).sort((a,b)=>a.date.localeCompare(b.date));
+  const partH=r=>r.dayPart==='custom'?(Number(r.customHours)||0):((r.dayPart==='am'||r.dayPart==='pm')?4:8);
+  let usedH=S.leaveRecords.filter(r=>r.empId===emp.id&&r.type==='comp'&&r.status==='approved'&&new Date(r.start)>=sixAgo)
+    .reduce((t,r)=>t+(r.dayPart==='custom'?(Number(r.customHours)||0):weekdaysBetween(r.start,r.end)*partH(r)),0);
+  // 先進先出：已使用的補休優先扣抵最早的加班時數，剩餘者各自依自己的加班日期＋6個月推算到期日
+  let remainH=0,nearestExpire=null;
+  earns.forEach(function(e){
+    let avail=e.hours;
+    if(usedH>0){ const used=Math.min(avail,usedH); avail-=used; usedH-=used; }
+    if(avail>0){
+      remainH+=avail;
+      const expire=new Date(e.date);expire.setMonth(expire.getMonth()+6);
+      if(!nearestExpire||expire<nearestExpire)nearestExpire=expire;
+    }
+  });
+  return {remainH,expire:nearestExpire};
+}
+function calcYearLeaveUsedH(empId,type,asOf){
+  const yStart=asOf.getFullYear()+'-01-01', yEnd=asOf.getFullYear()+'-12-31';
+  const partH=r=>r.dayPart==='custom'?(Number(r.customHours)||0):((r.dayPart==='am'||r.dayPart==='pm')?4:8);
+  return S.leaveRecords.filter(r=>r.empId===empId&&r.type===type&&r.status==='approved'&&r.start>=yStart&&r.start<=yEnd)
+    .reduce((t,r)=>t+(r.dayPart==='custom'?(Number(r.customHours)||0):weekdaysBetween(r.start,r.end)*partH(r)),0);
 }
 function fmtDaysH(h){
   const d=Math.floor(h/8),r=h%8;
@@ -2460,7 +2538,7 @@ function renderPerfectAttendanceHTML(year, month){
 ════════════════════════════════════════ */
 let S_ckMonth = new Date().getMonth();
 let S_ckYear  = new Date().getFullYear();
-let S_ckTab   = 1; // 1=遲到總覽 2=請假總覽 3=全勤名單 4=每日明細
+let S_ckTab   = 1; // 1=遲到總覽 2=請假總覽 3=全勤名單 4=每日明細 5=假期總覽
 let S_ckDept  = 'all'; // 每日明細用：部門篩選
 let S_ckEmp   = 'all'; // 每日明細用：單一員工篩選
 
@@ -2485,17 +2563,16 @@ function changeCkMonth(dir){
 }
 function switchCkTab(n){
   S_ckTab = n;
-  $('ckTab1').style.background = n===1 ? 'var(--gold)' : 'none';
-  $('ckTab1').style.color      = n===1 ? '#1a1808'     : 'var(--gold)';
-  $('ckTab2').style.background = n===2 ? 'var(--gold)' : 'none';
-  $('ckTab2').style.color      = n===2 ? '#1a1808'     : 'var(--gold)';
-  $('ckTab3').style.background = n===3 ? 'var(--gold)' : 'none';
-  $('ckTab3').style.color      = n===3 ? '#1a1808'     : 'var(--gold)';
-  $('ckTab4').style.background = n===4 ? 'var(--gold)' : 'none';
-  $('ckTab4').style.color      = n===4 ? '#1a1808'     : 'var(--gold)';
+  [1,2,3,4,5].forEach(function(i){
+    const btn=$('ckTab'+i); if(!btn) return;
+    btn.style.background = n===i ? 'var(--gold)' : 'none';
+    btn.style.color      = n===i ? '#1a1808'     : 'var(--gold)';
+  });
   const fr = $('ckFilterRow');
   if(fr) fr.style.display = n===4 ? 'flex' : 'none';
   if(n===4) populateCkEmpSelect();
+  const mr = $('ckMonthRow');
+  if(mr) mr.style.display = n===5 ? 'none' : 'flex'; // 假期總覽是即時餘額快照，不需月份切換
   renderCheckinPage();
 }
 function populateCkEmpSelect(){
@@ -2612,6 +2689,9 @@ function renderCheckinPage(){
       '<tr style="color:#aaa;font-size:11px;border-bottom:2px solid var(--gold)"><th style="padding:6px 4px;text-align:left">日期</th><th style="padding:6px 4px;text-align:left">員工</th><th style="padding:6px 4px;text-align:left">職稱</th><th style="padding:6px 4px">上班</th><th style="padding:6px 4px">下班</th><th style="padding:6px 4px">遲到</th><th style="padding:6px 4px">狀態</th></tr>'+
       (tableRows||'<tr><td colspan="7" style="padding:14px;color:#bbb;text-align:center">本月尚無資料</td></tr>')+
       '</table></div></div>';
+  } else if(S_ckTab === 5){
+    // 假期總覽
+    $('ckContent').innerHTML = renderLeaveOverviewSection();
   } else {
     // 請假總覽
     const leaveList=actEmps.map(function(e){const leaves=S.leaveRecords.filter(function(r){return r.empId===e.id&&r.status==='approved'&&(r.start||'').startsWith(ym);});return {e,leaves};}).filter(function(x){return x.leaves.length>0;});
@@ -2625,7 +2705,89 @@ function renderCheckinPage(){
       (noLeaveList.length?noLeaveList.map(function(x){return x.e.name;}).join('　'):'-')+'</div></div>';
   }
 }
- 
+
+/* ════════════════════════════════════════
+   假期總覽（owner／行政主管／會計）
+   一次看到所有在職員工的各假別餘額，比照 NUEiP 假期查詢表
+════════════════════════════════════════ */
+function fmtHoursDays(h){
+  const d=h/8;
+  const dStr=Number.isInteger(d)?d:d.toFixed(1);
+  return h+'h（'+dStr+'天）';
+}
+function getLeaveOverviewRows(){
+  const asOf=new Date();
+  return S.employees.filter(function(e){return e.status==='active';})
+    .sort(function(a,b){return a.name.localeCompare(b.name);})
+    .map(function(e){
+      return {
+        e:e,
+        annual:calcAnnualOverview(e,asOf),
+        comp:calcCompOverview(e,asOf),
+        sickUsedH:calcYearLeaveUsedH(e.id,'sick',asOf),
+        personalUsedH:calcYearLeaveUsedH(e.id,'personal',asOf),
+      };
+    });
+}
+function renderLeaveOverviewSection(){
+  const asOf=new Date();
+  const rows=getLeaveOverviewRows();
+  const rowsHtml=rows.map(function(x){
+    const e=x.e, a=x.annual, c=x.comp;
+    const annualCell=a.noneYet?'0h（0天）':fmtHoursDays(a.remainH);
+    const annualRangeCell=a.noneYet?(e.hireDate+' 起算'):(ymd(a.start)+' ~ '+ymd(a.end));
+    const annualNearExpire=!a.noneYet&&a.remainH>0&&((a.end-asOf)/86400000)<60;
+    const compCell=c.remainH+'h';
+    const compExpireCell=c.expire?ymd(c.expire):'—';
+    const compNearExpire=c.remainH>0&&c.expire&&((c.expire-asOf)/86400000)<30;
+    const highlight=annualNearExpire||compNearExpire;
+    const prenatalCell=e.prenatalEnabled?(prenatalRemainHalf(e)+' 個半天／共 14'):'—';
+    return '<tr'+(highlight?' style="background:#fffbe0"':'')+'>'+
+      '<td style="padding:8px 6px;white-space:nowrap"><div style="font-weight:700">'+e.name+'</div><div style="font-size:10px;color:#999">'+(e.role||'')+'</div></td>'+
+      '<td style="padding:8px 6px;text-align:center;white-space:nowrap">'+annualCell+'</td>'+
+      '<td style="padding:8px 6px;text-align:center;white-space:nowrap;font-size:11px;color:#666">'+annualRangeCell+'</td>'+
+      '<td style="padding:8px 6px;text-align:center;white-space:nowrap">'+compCell+'</td>'+
+      '<td style="padding:8px 6px;text-align:center;white-space:nowrap;font-size:11px;color:#666">'+compExpireCell+'</td>'+
+      '<td style="padding:8px 6px;text-align:center;white-space:nowrap">已用 '+x.sickUsedH+'h／年度 240h</td>'+
+      '<td style="padding:8px 6px;text-align:center;white-space:nowrap">已用 '+x.personalUsedH+'h／年度 112h</td>'+
+      '<td style="padding:8px 6px;text-align:center;white-space:nowrap">'+prenatalCell+'</td>'+
+      '</tr>';
+  }).join('');
+  return '<div class="section"><div class="sec-head">🌿 假期總覽'+
+    (rows.length?'<button onclick="exportLeaveOverviewCsv()" style="font-size:11px;padding:3px 10px;border:none;border-radius:8px;background:var(--gold);color:var(--dark);font-weight:700;cursor:pointer">⬇️ 匯出 CSV</button>':'')+
+    '</div><div style="overflow-x:auto;padding:4px 14px"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:820px">'+
+    '<tr style="color:#aaa;font-size:11px;border-bottom:2px solid var(--gold)">'+
+    '<th style="padding:6px;text-align:left">員工</th><th style="padding:6px">特休剩餘</th><th style="padding:6px">特休有效期間</th>'+
+    '<th style="padding:6px">補休剩餘</th><th style="padding:6px">補休到期日</th><th style="padding:6px">病假已用</th>'+
+    '<th style="padding:6px">事假已用</th><th style="padding:6px">產檢假剩餘</th></tr>'+
+    (rowsHtml||'<tr><td colspan="8" style="padding:14px;color:#bbb;text-align:center">無在職員工資料</td></tr>')+
+    '</table></div>'+
+    '<div style="padding:0 14px 10px;font-size:10px;color:#bbb">淡黃底：特休有效期間剩不到 60 天，或補休到期日剩不到 30 天，且仍有餘額</div>'+
+    '</div>';
+}
+function exportLeaveOverviewCsv(){
+  const rows=getLeaveOverviewRows();
+  if(!rows.length){toast('目前無在職員工資料可匯出','warn');return;}
+  const header=['員工','職稱','特休剩餘(h)','特休剩餘(天)','特休有效期間','補休剩餘(h)','補休到期日','病假已用(h)／年度240h','事假已用(h)／年度112h','產檢假剩餘'];
+  const csvRows=rows.map(function(x){
+    const e=x.e, a=x.annual, c=x.comp;
+    const annualRange=a.noneYet?(e.hireDate+' 起算'):(ymd(a.start)+' ~ '+ymd(a.end));
+    const annualH=a.noneYet?0:a.remainH;
+    const annualDaysNum=annualH/8;
+    const annualDays=Number.isInteger(annualDaysNum)?annualDaysNum:annualDaysNum.toFixed(1);
+    return [e.name, e.role||'', annualH, annualDays, annualRange, c.remainH, c.expire?ymd(c.expire):'', x.sickUsedH, x.personalUsedH, e.prenatalEnabled?(prenatalRemainHalf(e)+'/14'):''];
+  });
+  const csv='﻿'+[header].concat(csvRows).map(function(row){
+    return row.map(function(v){return '"'+String(v).replace(/"/g,'""')+'"';}).join(',');
+  }).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download='假期總覽_'+today()+'.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function renderSalaryPage(){
   const role=ROLES[S.role]; const u=S.users[S.role];
   const myEmp=S.employees.find(e=>e.id===u.empId)||S.employees[0];
@@ -2634,7 +2796,8 @@ function renderSalaryPage(){
   $('salGrid').innerHTML='';
   const mLabel=S_rptYear+' 年 '+(S_rptMonth+1)+' 月';
   if($('rptMonthLabel')) $('rptMonthLabel').textContent=mLabel;
-  const showFull=role.canViewAll;
+  // 「全員月報」含底薪／扣薪等金額，僅 owner／會計（canViewSalary）可看；行政主管雖 canViewAll 但不可看薪資
+  const showFull=role.canViewSalary;
   if($('rptTab2')) $('rptTab2').style.display=showFull?'block':'none';
   if(!showFull) S_rptTab=1;
   if(S_rptTab===1) renderMyReport(myEmp,role,u);
@@ -2686,6 +2849,8 @@ function renderMyReport(myEmp,role,u){
 }
  
 function renderAllReport(role){
+  // 全員月報含底薪／扣薪金額，僅 owner／會計可見；就算被誤呼叫也擋下，不外洩任何人的薪資
+  if(!role.canViewSalary){ $('salContent').innerHTML=''; return; }
   const fmt=function(n){return 'NT$'+n.toLocaleString();};
   const ym=S_rptYear+'-'+String(S_rptMonth+1).padStart(2,'0');
   const actEmps=S.employees.filter(function(e){return e.status==='active';});
@@ -2940,6 +3105,11 @@ function rejectOt(id){
    NAV & UTILS
 ════════════════════════════════════════ */
 function switchPage(n){
+  // 薪資頁只有 owner／會計可見，行政主管等其他角色一律擋下並導回打卡頁
+  if(n==='salary' && !ROLES[S.role].canViewSalary){
+    toast('無權限查看薪資頁','err');
+    n='home';
+  }
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   $('page-'+n).classList.add('active');$('nav-'+n).classList.add('active');
