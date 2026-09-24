@@ -6,7 +6,7 @@ Index · HTML
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover"/>
 <title>Noble Design Daka</title>
 <meta property="og:title" content="高尚空間設計｜打卡系統"/>
 <meta property="og:description" content="Noble Design Daka - 員工出勤管理系統"/>
@@ -247,7 +247,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 .bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:var(--white);border-top:1px solid var(--border);display:flex;padding-bottom:env(safe-area-inset-bottom,6px);z-index:50}
 .nav-btn{flex:1;padding:9px 0 6px;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:none;cursor:pointer;font-size:11.5px;color:#bbb;font-weight:700;transition:color .2s}
 .nav-btn.active{color:var(--gold)}.nav-icon{font-size:24px}
-.page{display:none;padding-bottom:96px}.page.active{display:block}
+.page{display:none;padding-bottom:calc(96px + env(safe-area-inset-bottom,0px))}.page.active{display:block}
 .pg-title{padding:12px 14px 3px;font-size:14px;font-weight:900;color:var(--ink)}
 .pg-sub{padding:0 14px 9px;font-size:10px;color:#aaa}
 .empty{color:#ccc;font-size:12px;text-align:center;padding:18px}
@@ -255,7 +255,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 </style>
 </head>
 <body>
-<div id="updateBanner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:linear-gradient(90deg,var(--gold),#e0c060);color:#1a1808;padding:10px 14px;font-size:13px;font-weight:900;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.15)">
+<div id="updateBanner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:linear-gradient(90deg,var(--gold),#e0c060);color:#1a1808;padding:calc(10px + env(safe-area-inset-top,0px)) 14px 10px;font-size:13px;font-weight:900;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.15)">
   🆕 系統已更新，<span style="text-decoration:underline;cursor:pointer" onclick="location.reload()">點此重新整理</span>
 </div>
 <div id="app">
@@ -3190,10 +3190,38 @@ function today(){return new Date().toISOString().split('T')[0]}
    LINE LIFF
 ════════════════════════════════════════ */
  
+// LINE 內建瀏覽器的 UA 一定會帶「Line/」字樣，用來判斷「這是不是真的員工手機上的 LINE 環境」。
+// 目的：LIFF SDK 讀取失敗（網路問題、CDN 被擋等）時，絕不能因為 typeof liff==='undefined' 就誤判成
+// 「開發者在桌面瀏覽器測試」而放行 Demo 模式（角色切換器＋自動老闆權限），那樣等於任何一個員工只要
+// 手機網路不穩、LIFF SDK 沒載入成功，就會被自動當成老闆、還看得到切換器。
+function isLikelyLineApp(){
+  try{ return /\bLine\//i.test(navigator.userAgent||''); }catch(e){ return false; }
+}
+// LIFF 讀取異常時的安全預設：鎖到最低權限（員工），隱藏所有導覽與角色切換器，只顯示錯誤提示
+function lockDownToStaffError(title,detail){
+  document.getElementById('roleSw').style.display='none';
+  setRole('staff');
+  ['nav-schedule','nav-leave','nav-expense','nav-overtime','nav-employees','nav-salary','nav-checkin'].forEach(id=>{ var el=$(id); if(el) el.style.display='none'; });
+  var hero=document.querySelector('.clock-hero');
+  if(hero){
+    hero.innerHTML=`
+      <div style="text-align:center;padding:40px 10px">
+        <div style="font-size:44px;margin-bottom:12px">⚠️</div>
+        <div style="font-size:16px;font-weight:900;color:var(--ink);margin-bottom:8px">${title}</div>
+        <div style="font-size:13px;color:#888;line-height:1.7">${detail}</div>
+      </div>`;
+  }
+}
 async function initLIFF(){
   try{
     if(typeof liff === 'undefined'){
-      // Demo 模式：顯示角色切換器讓測試用
+      if(isLikelyLineApp()){
+        // 人在 LINE 裡卻讀不到 LIFF SDK（多半是網路問題／CDN 被擋），視為異常，絕不能放行 Demo 模式
+        console.log('LINE 環境但 LIFF SDK 未載入，鎖定為最低權限');
+        lockDownToStaffError('系統載入失敗','請檢查網路連線後，完全關閉 LINE 再重新開啟打卡系統<br>若持續發生請聯絡管理者');
+        return;
+      }
+      // 確認不是 LINE 環境，才是真的在桌面瀏覽器測試：顯示角色切換器讓測試用
       console.log('Demo 模式');
       document.getElementById('roleSw').style.display='flex';
       setRole('owner');
@@ -3273,20 +3301,10 @@ async function initLIFF(){
     console.log('LINE 登入：', lineUserId);
   } catch(e){
     console.log('LIFF 錯誤', e.message);
-    // 安全防護：LIFF 載入異常時一律降到最低權限並鎖住畫面，避免露出老闆介面
-    if(typeof liff !== 'undefined'){
-      document.getElementById('roleSw').style.display='none';
-      setRole('staff');
-      ['nav-schedule','nav-leave','nav-expense','nav-overtime','nav-employees','nav-salary','nav-checkin'].forEach(id=>{ var el=$(id); if(el) el.style.display='none'; });
-      var hero=document.querySelector('.clock-hero');
-      if(hero){
-        hero.innerHTML=`
-          <div style="text-align:center;padding:40px 10px">
-            <div style="font-size:44px;margin-bottom:12px">⚠️</div>
-            <div style="font-size:16px;font-weight:900;color:var(--ink);margin-bottom:8px">系統載入異常</div>
-            <div style="font-size:13px;color:#888;line-height:1.7">請完全關閉 LINE 後重新開啟打卡系統<br>若持續發生請聯絡管理者</div>
-          </div>`;
-      }
+    // 安全防護：LIFF 載入異常時一律降到最低權限並鎖住畫面，避免露出老闆介面。
+    // 就算此時 liff 剛好是 undefined，只要判斷出是 LINE 環境，一樣鎖定，不放行 Demo 模式。
+    if(typeof liff !== 'undefined' || isLikelyLineApp()){
+      lockDownToStaffError('系統載入異常','請完全關閉 LINE 後重新開啟打卡系統<br>若持續發生請聯絡管理者');
     } else {
       document.getElementById('roleSw').style.display='flex';
     }
