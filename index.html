@@ -1269,10 +1269,25 @@ function updateBannerLive(n){
   if(adjM<startM){b.className='banner info';b.textContent=`⏰ 距 ${sh.name} 上班還有 ${startM-adjM} 分鐘`;}
   else if(adjM<=flexEnd){b.className=sh.key==='night'?'banner night':'banner flex';b.textContent=`✅ 彈性時段，${pad(Math.floor(flexEnd/60)%24)}:${pad(flexEnd%60)} 前到不算遲到`;}
   else{
+    // 尚未打卡，這裡只是「現在這一刻」的預告數字，不是已經記錄的遲到，文字要標明是預告避免誤會
     const late=adjM-flexEnd;const over=Math.max(0,late-remain);
-    if(over===0){b.className='banner buf';b.textContent=`🟡 遲到 ${late} 分（從${pad(Math.floor(flexEnd/60)%24)}:${pad(flexEnd%60)}算）｜月緩衝剩 ${remain-late} 分`;}
-    else{b.className='banner over';b.textContent=`🔴 遲到 ${late} 分｜緩衝已耗盡，超出 ${over} 分`;}
+    if(over===0){b.className='banner buf';b.textContent=`🟡 目前打卡將遲到 ${late} 分（從${pad(Math.floor(flexEnd/60)%24)}:${pad(flexEnd%60)}算）｜月緩衝剩 ${remain-late} 分`;}
+    else{b.className='banner over';b.textContent=`🔴 目前打卡將遲到 ${late} 分｜緩衝已耗盡，將超出 ${over} 分`;}
   }
+}
+// 今天已經打過卡時，紅色警示要依「實際打卡時間」重算遲到狀態，不能繼續用「現在時間」
+// （否則打卡後很晚才打開系統，會被舊的即時預告文字誤導成已經遲到很多）
+function updateBannerFromActualClockIn(inTimeStr){
+  const bn=$('lateBanner'); if(!bn) return;
+  const sh=getShift();
+  const [hh,mm]=inTimeStr.split(':').map(Number);
+  const t=new Date(); t.setHours(hh,mm,0,0);
+  const c=calcLate(t,sh);
+  const remain=S.buf.totalMins-S.buf.usedMins;
+  if(c.status==='ontime'){bn.className='banner ok';bn.textContent=`✅ 準時上班（${inTimeStr}）！下班 ${c.minOut}`;}
+  else if(c.status==='flex'){bn.className=sh.key==='night'?'banner night':'banner flex';bn.textContent=`✅ 彈性時段到班（${inTimeStr}）｜下班順延至 ${c.minOut}`;}
+  else if(c.overMins===0){bn.className='banner buf';bn.textContent=`🟡 ${inTimeStr} 到班，遲到 ${c.lateMins} 分，月緩衝扣除，剩 ${remain} 分｜下班 ${c.minOut}`;}
+  else{bn.className='banner over';bn.textContent=`🔴 ${inTimeStr} 到班，遲到 ${c.lateMins} 分，超出 ${c.overMins} 分｜下班 ${c.minOut}`;}
 }
  
 /* ════════════════════════════════════════
@@ -1415,6 +1430,10 @@ async function syncTodayClockStatus(){
       S.inTime = timeOf(lastIn); S.inDate = todayStr;
     }
     if(lastOut){ $('sOut').textContent = timeOf(lastOut); $('sOutNote').textContent='完成'; }
+    // 紅色警示要依「今天最早那筆上班打卡」（不是現在時間）重新計算遲到狀態，
+    // 補卡核准後也會補進新的 in 紀錄，這裡取最早一筆才能正確反映補卡後的實際到班時間
+    const firstIn = todays.find(c=>c.type==='in'); // todays 已依時間由舊到新排序
+    if(firstIn) updateBannerFromActualClockIn(timeOf(firstIn));
     // 只要今天最後一筆是 in（還沒打下班），就視為「已上班、待下班」
     S.clockedIn = !!(lastIn && (!lastOut || new Date(lastIn.checked_at) > new Date(lastOut.checked_at)));
     enableBtn();
@@ -1683,6 +1702,11 @@ async function approveMakeup(id){
   S.makeupRecords=S.makeupRecords.map(m=>m.id===id?Object.assign({},m,{status:'approved'}):m);
   renderMakeupList();
   syncTodayClockStatus();
+  // 補卡寫入 checkins 後，全公司共用的打卡快取（calcMonthlyStats 依賴這份資料）必須重新載入，
+  // 否則出勤頁／月報／薪資扣款會繼續沿用核准前的舊資料，讓那天的遲到判定沒有跟著更新
+  await loadAllCheckins();
+  renderCheckinPage();
+  renderSalaryPage();
   toast('✅ 已核准補卡，已補進打卡紀錄','ok');
   const empName=(S.employees.find(e=>e.id===mk.empId)||{}).name||mk.empId;
   sendLineMsg(`✅ 補卡核准通知\n\n員工：${empName}\n日期：${mk.date}\n類型：${mk.type==='in'?'上班卡':'下班卡'}\n時間：${mk.time}`);
