@@ -343,6 +343,21 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
     <div class="log-list" id="logList"><div class="empty">尚無打卡紀錄</div></div>
   </div>
  
+  <!-- 我的出勤紀錄（整月逐日，缺卡可一鍵帶入補卡表單） -->
+  <div class="section" id="maSection">
+    <div class="sec-head">📆 我的出勤紀錄</div>
+    <div id="maEmpRow" style="display:none;padding:10px 14px 0">
+      <select class="f-select" id="maEmpSelect" onchange="changeMaEmp()" style="margin-bottom:0"></select>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 14px 8px">
+      <button onclick="changeMaMonth(-1)" style="border:none;background:var(--mist);border-radius:8px;padding:6px 14px;font-size:16px;cursor:pointer">‹</button>
+      <div id="maMonthLabel" style="flex:1;text-align:center;font-size:13px;font-weight:900;color:var(--ink)"></div>
+      <button onclick="changeMaMonth(1)" style="border:none;background:var(--mist);border-radius:8px;padding:6px 14px;font-size:16px;cursor:pointer">›</button>
+    </div>
+    <div id="maSummary" style="padding:0 14px 8px;font-size:12px;color:#888;font-weight:700"></div>
+    <div id="maList" style="overflow-x:auto;padding:0 8px 8px"><div class="empty">載入中…</div></div>
+  </div>
+
   <!-- 補卡 -->
   <div class="section">
     <div class="sec-head">✏️ 補卡申請</div>
@@ -1135,7 +1150,7 @@ const S = {
   expNextId:4, salaryModalEmpId:null, photoDataUrl:null, lvPhotoDataUrl:null,
   overtimes:[],
   holidays:{},
-  currentExpMonth: new Date().toISOString().slice(0,7),
+  currentExpMonth: tDateStr(Date.now()).slice(0,7),
 };
  
 /* ════════════════════════════════════════
@@ -1177,6 +1192,8 @@ function setRole(r){
   renderSalaryPage(); renderExpensePage(); renderScheduleWeek();
   if(role.canAddEmp||role.canViewAll)renderEmpList();
   updateMkEmpSelect(); updateMkShiftSelect();
+  // 我的出勤紀錄：換角色就重置選定員工與請假資料範圍，再重新載入
+  S_maEmp=null; S_maLeavesReady=false; refreshMyAttendance();
   // 安全防護：若切換角色前正停留在對新角色已不可見的頁面（例如薪資頁），強制導回打卡頁，
   // 避免測試用的角色切換器讓敏感內容（如薪資）殘留在畫面上
   const activePage=document.querySelector('.page.active');
@@ -1557,7 +1574,7 @@ async function doClockAction(type){
     else{bn.className='banner over';bn.textContent=`🔴 遲到 ${c.lateMins} 分，超出 ${c.overMins} 分｜下班 ${c.minOut}`;}
     addLog('in','上班打卡',near?.o.name||'遠端',ts,c,sh);
     saveCheckin(S.users[S.role].empId,'in',S.gps?.la,S.gps?.lo,near?.o.id,sh.key).then(saved=>{
-      if(saved){ S.allCheckins=S.allCheckins||[]; S.allCheckins.unshift({empId:saved.emp_id,type:saved.type,checked_at:saved.checked_at,lat:saved.lat,lng:saved.lng,officeId:saved.office_id}); }
+      if(saved){ S.allCheckins=S.allCheckins||[]; S.allCheckins.unshift({empId:saved.emp_id,type:saved.type,checked_at:saved.checked_at,lat:saved.lat,lng:saved.lng,officeId:saved.office_id}); renderMyAttendance(); }
     });
     const canSeeMoney=ROLES[S.role].canViewSalary;
     const msg=c.status==='ontime'?`✅ 準時上班 ${ts}`:
@@ -1569,7 +1586,7 @@ async function doClockAction(type){
     S.clockedIn=false;$('sOut').textContent=ts;$('sOutNote').textContent='完成';
     addLog('out','下班打卡',near?.o.name||'遠端',ts,null,sh);
     saveCheckin(S.users[S.role].empId,'out',S.gps?.la,S.gps?.lo,near?.o.id,sh.key).then(saved=>{
-      if(saved){ S.allCheckins=S.allCheckins||[]; S.allCheckins.unshift({empId:saved.emp_id,type:saved.type,checked_at:saved.checked_at,lat:saved.lat,lng:saved.lng,officeId:saved.office_id}); }
+      if(saved){ S.allCheckins=S.allCheckins||[]; S.allCheckins.unshift({empId:saved.emp_id,type:saved.type,checked_at:saved.checked_at,lat:saved.lat,lng:saved.lng,officeId:saved.office_id}); renderMyAttendance(); }
     });
     toast(`下班打卡 ${ts}（${sh.name}）`,'ok');
   }
@@ -1686,6 +1703,187 @@ function renderMakeupList(){
     </div>`;
   }).join('');
 }
+/* ════════════════════════════════════════
+   我的出勤紀錄（打卡頁）
+   資料來源：S.allCheckins（checkins）、S.leaveRecords（leave_requests）、S.holidays、getShift()
+   一般員工只能看自己；owner／行政／會計（canViewAll）可用下拉選單看其他員工
+════════════════════════════════════════ */
+let S_maMonth=new Date().getMonth();
+let S_maYear=new Date().getFullYear();
+let S_maEmp=null;        // 管理者選定要看的員工，null＝看自己
+let S_maViewEmp=null;    // 目前畫面實際顯示的員工（補卡按鈕帶入對象用）
+let S_maLeavesReady=false;
+const MA_WD=['日','一','二','三','四','五','六'];
+function maViewEmpId(){
+  const role=ROLES[S.role]; const u=S.users[S.role];
+  // 權限防線：非 canViewAll 一律只能看自己，不管 S_maEmp 被設成什麼
+  if(!role.canViewAll) return u.empId;
+  if(S_maEmp) return S_maEmp;
+  if(u.empId) return u.empId;
+  const first=S.employees.find(e=>e.status==='active');
+  return first?first.id:null;
+}
+async function refreshMyAttendance(){
+  const role=ROLES[S.role]; const u=S.users[S.role];
+  // 請假資料原本只有進請假頁才會載入，這裡先補載，才能正確判斷請假日不算缺卡
+  // 沒有綁定 empId 時不載入（loadLeaves(null) 會載入全公司請假）
+  if(u.empId || role.canViewAll) await loadLeaves(role.canViewAll ? null : u.empId);
+  S_maLeavesReady=true;
+  renderMyAttendance();
+}
+function changeMaMonth(dir){
+  S_maMonth+=dir;
+  if(S_maMonth>11){S_maMonth=0;S_maYear++;}
+  if(S_maMonth<0){S_maMonth=11;S_maYear--;}
+  renderMyAttendance();
+}
+function changeMaEmp(){
+  if(!ROLES[S.role].canViewAll) return;
+  S_maEmp=$('maEmpSelect').value||null;
+  renderMyAttendance();
+}
+// 遲到分鐘：與薪資（calcMonthlyStats）同一基準，固定以 09:30 為界，員工看到的數字要和實際扣款一致
+function maLateMins(inT){
+  if(inT<='09:30') return 0;
+  const p=inT.split(':').map(Number);
+  return (p[0]*60+p[1])-(9*60+30);
+}
+function buildMyAttendanceRows(empId, year, month){
+  const ym=year+'-'+String(month+1).padStart(2,'0');
+  const nowStr=tDateStr(Date.now()); // 台北時間的今天（today() 用 UTC，台北早上 8 點前會差一天）
+  const emp=S.employees.find(e=>e.id===empId);
+  const hire=emp&&emp.hireDate?String(emp.hireDate).slice(0,10):null;
+  const all=S.allCheckins||[];
+  // 全公司打卡只載入最近 3000 筆，太舊的月份資料不完整，不能拿來判定缺卡
+  const truncBefore=(all.length>=3000)?tDateStr(all[all.length-1].checked_at):null;
+  const byDay={};
+  all.forEach(function(c){
+    if(c.empId!==empId) return;
+    const d=tDateStr(c.checked_at);
+    if(!d.startsWith(ym)) return;
+    const t=tTimeStr(c.checked_at);
+    const r=byDay[d]||(byDay[d]={inT:null,outT:null});
+    if(c.type==='in'  && (!r.inT  || t<r.inT))  r.inT=t;
+    if(c.type==='out' && (!r.outT || t>r.outT)) r.outT=t;
+  });
+  const leaves=S.leaveRecords.filter(r=>r.empId===empId);
+  const makeups=(S.makeupRecords||[]).filter(m=>m.empId===empId&&m.status==='pending');
+  const daysInMonth=new Date(year,month+1,0).getDate();
+  const rows=[];
+  for(let d=1; d<=daysInMonth; d++){
+    const ds=ym+'-'+String(d).padStart(2,'0');
+    if(ds>nowStr) break;                 // 未來日期不顯示
+    if(hire && ds<hire) continue;        // 到職日之前不算缺卡
+    const wd=new Date(Date.UTC(year,month,d)).getUTCDay();
+    const v=byDay[ds]||{inT:null,outT:null};
+    const sh=getShift(ds);
+    const hol=S.holidays&&S.holidays[ds];
+    const leave=leaves.find(r=>r.status==='approved'&&r.start<=ds&&r.end>=ds);
+    const pendingLeave=!leave&&leaves.some(r=>r.status==='pending'&&r.start<=ds&&r.end>=ds);
+    const row={ds:ds,wd:wd,sched:'—',inT:v.inT,outT:v.outT,work:'—',tags:[],missing:[],pendingMk:[],off:false,alert:false,note:''};
+    if(v.inT&&v.outT){
+      const a=v.inT.split(':').map(Number), b=v.outT.split(':').map(Number);
+      const mins=(b[0]*60+b[1])-(a[0]*60+a[1]);
+      if(mins>0) row.work=Math.floor(mins/60)+'h'+String(mins%60).padStart(2,'0')+'m';
+    }
+    if(truncBefore && ds<=truncBefore){
+      row.tags.push({t:'資料未載入',c:'#bbb'}); row.off=true; rows.push(row); continue;
+    }
+    if(hol){
+      row.off=true;
+      row.tags.push({t:(hol.type==='suspension'?'📢 停班：':'🎉 國定假日：')+hol.name,c:'#999'});
+      rows.push(row); continue;
+    }
+    if(wd===0||wd===6){
+      row.off=true;
+      row.tags.push({t:'例假日'+((v.inT||v.outT)?'（有出勤）':''),c:'#999'});
+      rows.push(row); continue;
+    }
+    row.sched=(sh.startH===null||sh.startH===undefined)?'自訂班':pad(sh.startH)+':'+pad(sh.startM||0)+'～'+endTimeStr(sh);
+    if(leave){
+      const p=leave.dayPart==='am'?'上半天':leave.dayPart==='pm'?'下半天':leave.dayPart==='custom'?(leave.customHours||'')+'小時':'';
+      row.tags.push({t:(leave.emoji||'')+(leave.name||leave.type)+(p?'（'+p+'）':''),c:'var(--teal)'});
+      rows.push(row); continue;      // 請假日不算缺卡、不算遲到
+    }
+    if(pendingLeave) row.note='請假待審核';
+    const isToday=(ds===nowStr);
+    const late=v.inT?maLateMins(v.inT):0;
+    if(v.inT&&v.outT){
+      row.tags.push(late>0?{t:'遲到 '+late+' 分',c:'var(--red)'}:{t:'正常',c:'var(--green)'});
+    } else if(isToday){
+      // 今天還沒結束，只有上班卡或還沒打卡都不算缺卡
+      if(v.inT) row.tags.push({t:'上班中',c:'var(--blue)'},...(late>0?[{t:'遲到 '+late+' 分',c:'var(--red)'}]:[]));
+      else row.tags.push({t:'今日尚未打卡',c:'#999'});
+    } else {
+      if(late>0) row.tags.push({t:'遲到 '+late+' 分',c:'var(--red)'});
+      if(!v.inT)  row.missing.push('in');
+      if(!v.outT) row.missing.push('out');
+      row.missing.forEach(function(t){ row.tags.push({t:t==='in'?'缺上班卡':'缺下班卡',c:'var(--red)'}); });
+      row.alert=true;
+      row.pendingMk=row.missing.filter(function(t){ return makeups.some(m=>m.date===ds&&m.type===t); });
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+function renderMyAttendance(){
+  const el=$('maList'); if(!el) return;
+  const role=ROLES[S.role]; const u=S.users[S.role];
+  // 管理者才顯示員工下拉選單
+  const empRow=$('maEmpRow');
+  const empId=maViewEmpId();
+  S_maViewEmp=empId;
+  if(role.canViewAll){
+    empRow.style.display='block';
+    $('maEmpSelect').innerHTML=S.employees.filter(e=>e.status==='active').map(e=>`<option value="${e.id}"${e.id===empId?' selected':''}>${e.name}・${e.role}${e.id===u.empId?'（我）':''}</option>`).join('');
+  } else {
+    empRow.style.display='none';
+  }
+  $('maMonthLabel').textContent=S_maYear+' 年 '+(S_maMonth+1)+' 月';
+  const sumEl=$('maSummary'); sumEl.textContent='';
+  if(!empId){ el.innerHTML='<div class="empty">尚未綁定員工資料</div>'; return; }
+  if(S.allCheckins===undefined || !S_maLeavesReady){ el.innerHTML='<div class="empty">載入中…</div>'; return; }
+  const rows=buildMyAttendanceRows(empId,S_maYear,S_maMonth);
+  if(!rows.length){ el.innerHTML='<div class="empty">本月尚無出勤資料</div>'; return; }
+  // 自己，或有代為補卡權限（老闆／行政）才顯示補卡按鈕
+  const canFix = empId===u.empId || role.canMakeup;
+  const lateDays=rows.filter(r=>r.tags.some(t=>t.t.indexOf('遲到')===0)).length;
+  const missDays=rows.filter(r=>r.alert).length;
+  const workDays=rows.filter(r=>r.inT||r.outT).length;
+  sumEl.innerHTML='出勤 '+workDays+' 天｜遲到 '+lateDays+' 次｜<span style="color:'+(missDays?'var(--red)':'#888')+'">缺卡 '+missDays+' 天</span>';
+  const th='padding:6px 4px;font-size:11px;color:#aaa';
+  el.innerHTML='<table style="width:100%;border-collapse:collapse;min-width:520px">'+
+    '<tr style="border-bottom:2px solid var(--gold)"><th style="'+th+';text-align:left">日期</th><th style="'+th+'">表定</th><th style="'+th+'">上班</th><th style="'+th+'">下班</th><th style="'+th+'">工時</th><th style="'+th+';text-align:left">出勤狀況</th></tr>'+
+    rows.map(function(r){
+      const dim=r.off?'color:#aaa;':'';
+      const tags=r.tags.map(function(t){ return '<span style="color:'+t.c+';font-weight:700">'+t.t+'</span>'; }).join('<span style="color:#ccc"> ｜ </span>');
+      let act='';
+      if(r.alert && canFix){
+        act=r.missing.map(function(t){
+          if(r.pendingMk.indexOf(t)>=0) return '<span style="font-size:10px;color:#e6a817;font-weight:700">'+(t==='in'?'上班':'下班')+'補卡審核中</span>';
+          const lbl=r.missing.length>1?(t==='in'?'補上班卡':'補下班卡'):'補卡';
+          return '<button class="btn-sm reject" onclick="prefillMakeup(\''+r.ds+'\',\''+t+'\')">'+lbl+'</button>';
+        }).join(' ');
+      }
+      return '<tr style="border-bottom:1px solid var(--rule);'+(r.alert?'background:var(--red-lt);':'')+dim+'">'+
+        '<td style="padding:7px 4px;font-size:12px;white-space:nowrap;font-weight:700">'+r.ds.slice(5).replace('-','/')+'（'+MA_WD[r.wd]+'）</td>'+
+        '<td style="padding:7px 4px;text-align:center;font-size:11px;white-space:nowrap">'+r.sched+'</td>'+
+        '<td style="padding:7px 4px;text-align:center;font-size:12px">'+(r.inT||'-')+'</td>'+
+        '<td style="padding:7px 4px;text-align:center;font-size:12px">'+(r.outT||'-')+'</td>'+
+        '<td style="padding:7px 4px;text-align:center;font-size:11px;white-space:nowrap">'+r.work+'</td>'+
+        '<td style="padding:7px 4px;font-size:11px">'+tags+(r.note?' <span style="color:#e6a817">（'+r.note+'）</span>':'')+(act?'<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">'+act+'</div>':'')+'</td></tr>';
+    }).join('')+'</table>';
+}
+// 缺卡那列的「補卡」按鈕：把日期、類型（和代補對象）帶進下方補卡表單
+function prefillMakeup(ds, type){
+  $('mkDate').value=ds;
+  $('mkType').value=type;
+  // 有代為補卡權限的角色，表單預設會是名單第一位，必須改成目前正在看的員工，避免補到別人身上
+  if(ROLES[S.role].canMakeup && $('mkEmp') && S_maViewEmp) $('mkEmp').value=S_maViewEmp;
+  $('mkTime').value='';
+  $('mkDate').scrollIntoView({behavior:'smooth',block:'center'});
+  toast('已帶入 '+ds+(type==='in'?' 上班卡':' 下班卡')+'，請填時間與原因','ok');
+}
 async function approveMakeup(id){
   if(S.role!=='owner'){toast('只有老闆可核准補卡','err');return;}
   const mk=S.makeupRecords.find(m=>m.id===id); if(!mk)return;
@@ -1707,6 +1905,7 @@ async function approveMakeup(id){
   await loadAllCheckins();
   renderCheckinPage();
   renderSalaryPage();
+  renderMyAttendance();
   toast('✅ 已核准補卡，已補進打卡紀錄','ok');
   const empName=(S.employees.find(e=>e.id===mk.empId)||{}).name||mk.empId;
   sendLineMsg(`✅ 補卡核准通知\n\n員工：${empName}\n日期：${mk.date}\n類型：${mk.type==='in'?'上班卡':'下班卡'}\n時間：${mk.time}`);
@@ -1715,7 +1914,7 @@ async function rejectMakeup(id){
   if(S.role!=='owner'){toast('只有老闆可拒絕補卡','err');return;}
   try{ await api('PATCH','/api/makeups/'+id,{status:'rejected'}); }catch(e){ console.error('rejectMakeup 錯誤：', e); }
   S.makeupRecords=S.makeupRecords.map(m=>m.id===id?Object.assign({},m,{status:'rejected'}):m);
-  renderMakeupList();
+  renderMakeupList(); renderMyAttendance();
   syncTodayClockStatus();
   toast('已拒絕補卡','warn');
 }
@@ -1743,7 +1942,7 @@ async function submitMakeup(){
   });
   if(saved && saved.id){
     S.makeupRecords.unshift({id:saved.id,empId:targetId,date,type,time,reason,status:'pending'});
-    renderMakeupList();
+    renderMakeupList(); renderMyAttendance();
     if(targetId===u.empId) checkPendingMakeupConflict();
     $('mkDate').value=today();$('mkTime').value=$('mkReason').value='';
     toast('📋 補卡申請已送出，等待老闆審核','ok');
@@ -1765,7 +1964,7 @@ function renderScheduleWeek(){
   const canEdit=ROLES[S.role].canEditSchedule;
   $('schedSub').textContent=canEdit?'點選日期可修改班別（主管/行政限定）':'查看本週班別';
   $('schedWeek').innerHTML=days.map((d,i)=>{
-    const ds=d.toISOString().split('T')[0];const sh=getShift(ds);
+    const ds=tDateStr(d.getTime());const sh=getShift(ds);
     return `<div class="sw-day${ds===todayStr?' today':''}${HOLS.includes(ds)?' holiday':''}" onclick="${canEdit?`onDayClick('${ds}')`:'void(0)'}">
       <div class="sw-date">${d.getDate()}</div><div class="sw-wd">${WDS[i]}</div>
       <div class="sw-sh" style="background:${sh.color}18;color:${sh.color}">${sh.emoji}${sh.name.replace('班','')}</div>
@@ -3185,6 +3384,7 @@ function switchPage(n){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   $('page-'+n).classList.add('active');$('nav-'+n).classList.add('active');
+  if(n==='home')refreshMyAttendance();
   if(n==='schedule')renderScheduleWeek();
   if(n==='leave'){
     renderLeaveGrid();
@@ -3208,7 +3408,7 @@ let _tt;
 function toast(msg,type='ok'){const el=$('toast');el.textContent=msg;el.className=type;el.classList.add('show');clearTimeout(_tt);_tt=setTimeout(()=>el.classList.remove('show'),3000);}
 function $(id){return document.getElementById(id)}
 function pad(n){return String(n||0).padStart(2,'0')}
-function today(){return new Date().toISOString().split('T')[0]}
+function today(){return tDateStr(Date.now())} // 台北時間的今天（toISOString 是 UTC，台北早上 8 點前會差一天）
  
 /* ════════════════════════════════════════
    LINE LIFF
@@ -3351,7 +3551,7 @@ async function initLIFF(){
     loadOvertimes().then(()=>{ try{renderOvertimePage();renderLeaveGrid();}catch(e){} });
     loadMakeups();
     { const _role=ROLES[S.role]; const _u=S.users[S.role]; loadExpenses(_role.canViewAll ? null : _u.empId); }
-    loadAllCheckins();
+    loadAllCheckins().then(()=>renderMyAttendance());
     startVersionWatcher();
     loadHolidays().then(()=>{
       try{
@@ -3362,6 +3562,7 @@ async function initLIFF(){
           hb.style.display='block';
         }
         renderLeaveGrid();
+        renderMyAttendance();
       }catch(e){}
     });
   }).catch(()=>{
