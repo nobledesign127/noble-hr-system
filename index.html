@@ -939,6 +939,53 @@ function officeLabel(officeId,lat,lng){
   if(officeId==='remote' || (o && !o.lat)) return lat&&lng?`🛰️ 外勤${distTxt}（<a href="https://maps.google.com/?q=${lat},${lng}" target="_blank" style="color:var(--teal)">看地圖</a>）`:'🛰️ 外勤';
   return o ? `🏢 ${o.name}` : (lat&&lng?`<a href="https://maps.google.com/?q=${lat},${lng}" target="_blank" style="color:var(--teal)">📍看地圖</a>${distTxt}`:'-');
 }
+/* ════════════════════════════════════════
+   打卡地點：公司／外勤判斷 + Google Maps 連結
+   注意：打卡時 office_id 一律存「最近的據點」（外勤員工在外面打卡也會是 xinyi），
+   所以不能只看 office_id，要用座標與據點的距離判斷（門檻與打卡當下的 200m 範圍一致）
+   資料庫沒有另外存地點名稱／距離，名稱取自 office_id 對應的據點，距離由座標即時算出
+════════════════════════════════════════ */
+const OFFICE_RANGE_M=200;
+function fmtDist(d){ return d>=1000 ? (d/1000).toFixed(1)+'km' : d+'m'; }
+function punchLocInfo(officeId,lat,lng){
+  if(officeId==='makeup') return {kind:'makeup',label:'補卡核准',dist:null,mapUrl:null};
+  const la=(lat==null||lat==='')?NaN:Number(lat), lo=(lng==null||lng==='')?NaN:Number(lng);
+  const hasXY=isFinite(la)&&isFinite(lo);
+  const o=OFFICES.find(x=>x.id===officeId);
+  let dist=null;
+  if(hasXY){
+    const ds=OFFICES.filter(x=>x.lat).map(x=>hav(la,lo,x.lat,x.lng)).sort((a,b)=>a-b);
+    if(ds.length) dist=ds[0];
+  }
+  const remote = !o || !o.lat || (dist!==null && dist>OFFICE_RANGE_M);
+  return {kind:remote?'remote':'office', label:remote?'外勤':o.name, dist:dist,
+          mapUrl:hasXY?('https://www.google.com/maps?q='+la+','+lo):null};
+}
+// canSeeLoc=false 時只顯示「外勤」標記，不顯示距離與地圖連結（座標細節僅限本人／老闆／行政主管）
+function punchLocLine(lbl,officeId,lat,lng,canSeeLoc){
+  const i=punchLocInfo(officeId,lat,lng);
+  let h='<div style="white-space:nowrap"><span style="color:#aaa">'+lbl+'</span> ';
+  if(i.kind==='remote'){
+    h+='<span style="background:#fff4e0;color:#a15c1a;border-radius:6px;padding:1px 6px;font-weight:700">🛰️ 外勤</span>';
+    if(canSeeLoc){
+      if(i.dist!==null) h+=' <span style="color:#999">距公司 '+fmtDist(i.dist)+'</span>';
+      if(i.mapUrl) h+=' <a href="'+i.mapUrl+'" target="_blank" rel="noopener" style="color:var(--teal);font-weight:700">📍查看位置</a>';
+    }
+  } else if(i.kind==='makeup'){
+    h+='<span style="color:#999">補卡核准</span>';
+  } else {
+    h+='<span style="color:#666">🏢 '+i.label+'</span>';
+    if(canSeeLoc && i.dist!==null) h+=' <span style="color:#bbb">'+fmtDist(i.dist)+'</span>';
+  }
+  return h+'</div>';
+}
+// rec：{inT,outT,inOff,inLat,inLng,outOff,outLat,outLng}
+function punchLocCellHtml(rec,canSeeLoc){
+  const parts=[];
+  if(rec.inT)  parts.push(punchLocLine('上',rec.inOff,rec.inLat,rec.inLng,canSeeLoc));
+  if(rec.outT) parts.push(punchLocLine('下',rec.outOff,rec.outLat,rec.outLng,canSeeLoc));
+  return parts.join('')||'-';
+}
 async function saveCheckin(empId, type, lat, lng, officeId, shiftKey) {
   try{
     return await sbPost('checkins', {
@@ -1763,8 +1810,8 @@ function buildMyAttendanceRows(empId, year, month){
     if(!d.startsWith(ym)) return;
     const t=tTimeStr(c.checked_at);
     const r=byDay[d]||(byDay[d]={inT:null,outT:null});
-    if(c.type==='in'  && (!r.inT  || t<r.inT))  r.inT=t;
-    if(c.type==='out' && (!r.outT || t>r.outT)) r.outT=t;
+    if(c.type==='in'  && (!r.inT  || t<r.inT))  { r.inT=t;  r.inOff=c.officeId;  r.inLat=c.lat;  r.inLng=c.lng; }
+    if(c.type==='out' && (!r.outT || t>r.outT)) { r.outT=t; r.outOff=c.officeId; r.outLat=c.lat; r.outLng=c.lng; }
   });
   const leaves=S.leaveRecords.filter(r=>r.empId===empId);
   const makeups=(S.makeupRecords||[]).filter(m=>m.empId===empId&&m.status==='pending');
@@ -1780,7 +1827,7 @@ function buildMyAttendanceRows(empId, year, month){
     const hol=S.holidays&&S.holidays[ds];
     const leave=leaves.find(r=>r.status==='approved'&&r.start<=ds&&r.end>=ds);
     const pendingLeave=!leave&&leaves.some(r=>r.status==='pending'&&r.start<=ds&&r.end>=ds);
-    const row={ds:ds,wd:wd,sched:'—',inT:v.inT,outT:v.outT,work:'—',tags:[],missing:[],pendingMk:[],off:false,alert:false,note:''};
+    const row={ds:ds,wd:wd,rec:v,sched:'—',inT:v.inT,outT:v.outT,work:'—',tags:[],missing:[],pendingMk:[],off:false,alert:false,note:''};
     if(v.inT&&v.outT){
       const a=v.inT.split(':').map(Number), b=v.outT.split(':').map(Number);
       const mins=(b[0]*60+b[1])-(a[0]*60+a[1]);
@@ -1847,13 +1894,15 @@ function renderMyAttendance(){
   if(!rows.length){ el.innerHTML='<div class="empty">本月尚無出勤資料</div>'; return; }
   // 自己，或有代為補卡權限（老闆／行政）才顯示補卡按鈕
   const canFix = empId===u.empId || role.canMakeup;
+  // 座標細節：本人可看自己的；看別人的僅老闆／行政主管（與出勤頁規則一致）
+  const canSeeLoc = empId===u.empId || S.role==='owner' || S.role==='admin';
   const lateDays=rows.filter(r=>r.tags.some(t=>t.t.indexOf('遲到')===0)).length;
   const missDays=rows.filter(r=>r.alert).length;
   const workDays=rows.filter(r=>r.inT||r.outT).length;
   sumEl.innerHTML='出勤 '+workDays+' 天｜遲到 '+lateDays+' 次｜<span style="color:'+(missDays?'var(--red)':'#888')+'">缺卡 '+missDays+' 天</span>';
   const th='padding:6px 4px;font-size:11px;color:#aaa';
-  el.innerHTML='<table style="width:100%;border-collapse:collapse;min-width:520px">'+
-    '<tr style="border-bottom:2px solid var(--gold)"><th style="'+th+';text-align:left">日期</th><th style="'+th+'">表定</th><th style="'+th+'">上班</th><th style="'+th+'">下班</th><th style="'+th+'">工時</th><th style="'+th+';text-align:left">出勤狀況</th></tr>'+
+  el.innerHTML='<table style="width:100%;border-collapse:collapse;min-width:680px">'+
+    '<tr style="border-bottom:2px solid var(--gold)"><th style="'+th+';text-align:left">日期</th><th style="'+th+'">表定</th><th style="'+th+'">上班</th><th style="'+th+'">下班</th><th style="'+th+';text-align:left">地點</th><th style="'+th+'">工時</th><th style="'+th+';text-align:left">出勤狀況</th></tr>'+
     rows.map(function(r){
       const dim=r.off?'color:#aaa;':'';
       const tags=r.tags.map(function(t){ return '<span style="color:'+t.c+';font-weight:700">'+t.t+'</span>'; }).join('<span style="color:#ccc"> ｜ </span>');
@@ -1870,6 +1919,7 @@ function renderMyAttendance(){
         '<td style="padding:7px 4px;text-align:center;font-size:11px;white-space:nowrap">'+r.sched+'</td>'+
         '<td style="padding:7px 4px;text-align:center;font-size:12px">'+(r.inT||'-')+'</td>'+
         '<td style="padding:7px 4px;text-align:center;font-size:12px">'+(r.outT||'-')+'</td>'+
+        '<td style="padding:7px 4px;font-size:11px">'+(r.off&&!(r.inT||r.outT)?'-':punchLocCellHtml(r.rec,canSeeLoc))+'</td>'+
         '<td style="padding:7px 4px;text-align:center;font-size:11px;white-space:nowrap">'+r.work+'</td>'+
         '<td style="padding:7px 4px;font-size:11px">'+tags+(r.note?' <span style="color:#e6a817">（'+r.note+'）</span>':'')+(act?'<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">'+act+'</div>':'')+'</td></tr>';
     }).join('')+'</table>';
@@ -2899,8 +2949,8 @@ function renderCheckinPage(){
       if(!byEmpDay[c.empId][d]) byEmpDay[c.empId][d]={inT:null,outT:null};
       const t = tTimeStr(c.checked_at);
       const rec = byEmpDay[c.empId][d];
-      if(c.type==='in' && (!rec.inT || t<rec.inT)){ rec.inT=t; rec.inLat=c.lat; rec.inLng=c.lng; }
-      if(c.type==='out' && (!rec.outT || t>rec.outT)){ rec.outT=t; rec.outLat=c.lat; rec.outLng=c.lng; }
+      if(c.type==='in' && (!rec.inT || t<rec.inT)){ rec.inT=t; rec.inLat=c.lat; rec.inLng=c.lng; rec.inOff=c.officeId; }
+      if(c.type==='out' && (!rec.outT || t>rec.outT)){ rec.outT=t; rec.outLat=c.lat; rec.outLng=c.lng; rec.outOff=c.officeId; }
     });
     const DAYS=['日','一','二','三','四','五','六'];
     const LEAVE_NAME={annual:'特休',sick:'病假',menstrual:'生理假',personal:'事假',comp:'補休',checkup:'產檢假'};
@@ -2943,22 +2993,22 @@ function renderCheckinPage(){
         rows.push({e:e,d:ds,wd:wd,v:v||{},status:status,statusColor:statusColor,late:late});
       }
     });
-    const mapIcon=(lat,lng,label)=> (isOwner&&lat&&lng) ? ` <span onclick="showMapModal(${lat},${lng},'${label}')" style="cursor:pointer">📍</span>`:'';
     const tableRows=rows.map(function(r){
       return '<tr style="border-bottom:1px solid var(--rule)">'+
         '<td style="padding:7px 4px;font-size:11px;color:#999;white-space:nowrap">'+r.d.slice(5)+'('+DAYS[r.wd]+')</td>'+
         '<td style="padding:7px 4px;font-weight:700;font-size:12px;white-space:nowrap">'+r.e.name+'</td>'+
         '<td style="padding:7px 4px;font-size:11px;color:#999">'+(r.e.role||'')+'</td>'+
-        '<td style="padding:7px 4px;text-align:center;font-size:12px">'+(r.v.inT||'-')+mapIcon(r.v.inLat,r.v.inLng,r.e.name+' 上班 '+r.d)+'</td>'+
-        '<td style="padding:7px 4px;text-align:center;font-size:12px">'+(r.v.outT||'-')+mapIcon(r.v.outLat,r.v.outLng,r.e.name+' 下班 '+r.d)+'</td>'+
+        '<td style="padding:7px 4px;text-align:center;font-size:12px">'+(r.v.inT||'-')+'</td>'+
+        '<td style="padding:7px 4px;text-align:center;font-size:12px">'+(r.v.outT||'-')+'</td>'+
+        '<td style="padding:7px 4px;font-size:11px">'+punchLocCellHtml(r.v,isOwner)+'</td>'+
         '<td style="padding:7px 4px;text-align:center;font-size:11px;color:'+(r.late>0?'var(--red)':'#ccc')+'">'+(r.late>0?r.late+'分':'-')+'</td>'+
         '<td style="padding:7px 4px;text-align:center;font-size:11px;font-weight:700;color:'+r.statusColor+'">'+r.status+'</td></tr>';
     }).join('');
     $('ckContent').innerHTML =
-      '<div class="section"><div class="sec-head">📅 每日打卡明細'+(isOwner?'（點 📍 看地圖）':'')+'</div>'+
-      '<div style="overflow-x:auto;padding:4px 14px"><table style="width:100%;border-collapse:collapse;min-width:560px">'+
-      '<tr style="color:#aaa;font-size:11px;border-bottom:2px solid var(--gold)"><th style="padding:6px 4px;text-align:left">日期</th><th style="padding:6px 4px;text-align:left">員工</th><th style="padding:6px 4px;text-align:left">職稱</th><th style="padding:6px 4px">上班</th><th style="padding:6px 4px">下班</th><th style="padding:6px 4px">遲到</th><th style="padding:6px 4px">狀態</th></tr>'+
-      (tableRows||'<tr><td colspan="7" style="padding:14px;color:#bbb;text-align:center">本月尚無資料</td></tr>')+
+      '<div class="section"><div class="sec-head">📅 每日打卡明細'+(isOwner?'（外勤可點 📍查看位置）':'')+'</div>'+
+      '<div style="overflow-x:auto;padding:4px 14px"><table style="width:100%;border-collapse:collapse;min-width:760px">'+
+      '<tr style="color:#aaa;font-size:11px;border-bottom:2px solid var(--gold)"><th style="padding:6px 4px;text-align:left">日期</th><th style="padding:6px 4px;text-align:left">員工</th><th style="padding:6px 4px;text-align:left">職稱</th><th style="padding:6px 4px">上班</th><th style="padding:6px 4px">下班</th><th style="padding:6px 4px;text-align:left">地點</th><th style="padding:6px 4px">遲到</th><th style="padding:6px 4px">狀態</th></tr>'+
+      (tableRows||'<tr><td colspan="8" style="padding:14px;color:#bbb;text-align:center">本月尚無資料</td></tr>')+
       '</table></div></div>';
   } else if(S_ckTab === 5){
     // 假期總覽
