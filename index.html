@@ -275,9 +275,9 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
   </div>
   </div>
   <div class="user-pill">
-    <div class="u-av" id="uAv" style="background:var(--gold);color:var(--dark)">E</div>
-    <div class="u-name" id="uName">Esther</div>
-    <div class="u-badge" id="uBadge" style="background:var(--gold);color:var(--dark)">老闆</div>
+    <div class="u-av" id="uAv" style="background:var(--mist);color:var(--dark)">?</div>
+    <div class="u-name" id="uName">登入中…</div>
+    <div class="u-badge" id="uBadge" style="background:var(--mist);color:var(--dark)">驗證中</div>
   </div>
 </header>
  
@@ -540,6 +540,7 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
           <select class="f-select" id="expCat" onchange="toggleCatInput()">
             <option value="material">🧱 材料購買</option>
             <option value="shipping">📦 郵寄/快遞</option>
+            <option value="transport">🚗 交通費</option>
             <option value="other">📎 其他（請在說明填寫）</option>
           </select>
         </div>
@@ -568,10 +569,10 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
       <!-- 照片上傳 -->
       <label class="f-lbl">發票/收據照片<span class="f-req">*</span>（必傳）</label>
       <div class="photo-upload" id="photoBox">
-        <input type="file" accept="image/*" capture="environment" onchange="handlePhoto(this)" id="photoInput"/>
+        <input type="file" accept="image/*" onchange="handlePhoto(this)" id="photoInput"/>
         <div id="photoPlaceholder">
           <div style="font-size:26px">📷</div>
-          <div style="font-size:12px;color:#888;font-weight:600;margin-top:4px">點擊拍照或選擇相片</div>
+          <div style="font-size:12px;color:#888;font-weight:600;margin-top:4px">點擊拍照，或從相簿選擇既有照片</div>
           <div style="font-size:10px;color:#bbb;margin-top:3px">請確保金額清晰可見</div>
         </div>
         <img id="photoPreview" class="photo-preview"/>
@@ -735,7 +736,7 @@ const ROLES = {
   admin:      { label:'行政主管', color:'#60A5FA', tc:'var(--dark)',
     canApproveLeave:false, canDeleteLeave:true, canMakeup:true, canEditSchedule:true,
     canAddEmp:true, canDisableEmp:false, canViewAll:true,
-    canViewSalary:false, canEditSalary:false, canApproveExp:true, canMarkPaid:false },
+    canViewSalary:false, canEditSalary:false, canApproveExp:false, canMarkPaid:false },
   accounting: { label:'會計',    color:'#34D399', tc:'var(--dark)',
     canApproveLeave:false, canDeleteLeave:false, canMakeup:false, canEditSchedule:false,
     canAddEmp:true, canDisableEmp:false, canViewAll:true,
@@ -774,6 +775,7 @@ const LEAVE_TYPES = [
 const CATS = {
   material:{ label:'🧱 材料購買', color:'var(--orange)' },
   shipping:{ label:'📦 郵寄/快遞', color:'var(--blue)' },
+  transport:{ label:'🚗 交通費',    color:'var(--teal)' },
   other:   { label:'📎 其他',      color:'#888' },
 };
 const CASES = [
@@ -1063,14 +1065,14 @@ async function loadExpenses(empId) {
     if(empId) params['emp_id'] = 'eq.' + empId;
     const data = await sbGet('expenses', params);
     if(data && Array.isArray(data)){
-      S.expenses = data.map(e => ({
+      S.expenses = scopeToViewer(data.map(e => ({
         id: e.id, empId: e.emp_id, empName: e.emp_name,
         date: e.date, caseId: e.case_id, caseName: e.case_name,
         cat: e.cat, catName: e.cat_name, desc: e.description,
         invoice: e.invoice, amount: e.amount,
         photoUrl: e.photo_url || '', status: e.status,
         createdAt: e.created_at, paidAt: e.paid_at || null,
-      }));
+      })));
       renderExpensePage();
     }
   }catch(e){
@@ -1092,13 +1094,13 @@ async function loadOvertimes(){
   try{
     const data = await api('GET','/api/overtimes');
     if(data && Array.isArray(data)){
-      S.overtimes = data.map(o=>({
+      S.overtimes = scopeToViewer(data.map(o=>({
         id:o.id, empId:o.emp_id, empName:o.emp_name,
         date:o.date, siteName:o.site_name,
         startTime:o.start_time, endTime:o.end_time,
         hours:Number(o.hours)||0, reason:o.reason,
         status:o.status||'pending', createdAt:o.created_at
-      }));
+      })));
     }
   }catch(e){ console.error('loadOvertimes 錯誤：', e); }
 }
@@ -1113,6 +1115,32 @@ async function loadHolidays(){
   }catch(e){ console.error('loadHolidays 錯誤：', e); }
 }
 function isHoliday(dateStr){ return !!(S.holidays && S.holidays[dateStr]); }
+/* ════════════════════════════════════════
+   台灣國定假日（出勤紀錄顯示用）
+   每年更新：把新一年的假期區間加進 TW_HOLIDAYS 即可，格式 [起日, 迄日, 名稱]（單日則起迄同一天）。
+   資料庫 holidays 表（停班日、手動新增的假日）優先，這份清單是預設值。
+   注意：請假天數計算（weekdaysBetween）仍只認資料庫的 isHoliday()，不會用這份清單。
+════════════════════════════════════════ */
+const TW_HOLIDAYS=[
+  // ── 2026 ──
+  ['2026-01-01','2026-01-01','元旦'],
+  ['2026-02-14','2026-02-22','春節'],
+  ['2026-02-27','2026-03-01','和平紀念日'],
+  ['2026-04-03','2026-04-06','兒童節、清明節'],
+  ['2026-05-01','2026-05-01','勞動節'],
+  ['2026-06-19','2026-06-19','端午節'],
+  ['2026-09-25','2026-09-25','中秋節'],
+  ['2026-09-28','2026-09-28','教師節'],
+  ['2026-10-09','2026-10-10','國慶日'],
+  ['2026-10-25','2026-10-25','光復節'],
+  ['2026-12-25','2026-12-25','行憲紀念日'],
+];
+function holidayOf(ds){
+  const db=S.holidays&&S.holidays[ds];
+  if(db) return db;
+  const h=TW_HOLIDAYS.find(function(x){ return ds>=x[0] && ds<=x[1]; });
+  return h ? {name:h[2],type:'national'} : null;
+}
 function renderSuspList(){
   const el=$('suspList'); if(!el)return;
   const list=Object.entries(S.holidays||{}).filter(([d,h])=>h.type==='suspension')
@@ -1179,7 +1207,9 @@ function startVersionWatcher(){
   }); // 從背景切回來（最常見：準備打卡前）也立即檢查一次
 }
 const S = {
-  role:'owner',
+  // 登入前一律是最低權限（staff＋未綁定）。身分只能由 setRole() 在 LIFF 確認 LINE 身分後（或桌面測試模式）設定，
+  // 不可再預設成 owner——否則 LIFF 尚未完成的空窗期，任何人都是老闆（會看到全部補卡、也能按核准）
+  role:'staff', authReady:false, lineUserId:null, demoMode:false,
   users:{
     owner:     {name:'Esther',   avatar:'E', empId:'A002',hireDate:'2019-11-29'},
     admin:     {name:'(未登入)', avatar:'?', empId:null,   hireDate:null},
@@ -1203,9 +1233,52 @@ const S = {
 /* ════════════════════════════════════════
    角色切換
 ════════════════════════════════════════ */
+// 資料範圍：一般員工任何情況都只能拿到自己的紀錄（未綁定＝什麼都沒有）
+function scopeToViewer(list){
+  const role=ROLES[S.role], u=S.users[S.role];
+  if(!S.authReady) return [];
+  if(role.canViewAll) return list;
+  if(!u.empId) return [];
+  return list.filter(x=>x.empId===u.empId);
+}
+// 依目前身分重新載入「會依角色分範圍」的資料（補卡／代墊／加班）。
+// 只在 setRole 之後呼叫（此時身分已確定），登入前不載入，避免用預設身分載入或畫出全公司資料。
+function reloadRoleScopedData(){
+  const role=ROLES[S.role], u=S.users[S.role];
+  S.makeupRecords=[]; S.overtimes=[]; S.expenses=[];
+  try{ renderMakeupList(); renderExpensePage(); renderOvertimePage(); }catch(e){}
+  if(!role.canViewAll && !u.empId) return; // 未綁定：不載入任何資料
+  loadMakeups();
+  loadExpenses(role.canViewAll ? null : u.empId);
+  loadOvertimes().then(()=>{ try{renderOvertimePage();renderLeaveGrid();}catch(e){} });
+}
+// 執行核准／拒絕等高權限操作前的身分核對。
+// 不只信任前端的 S.role（它是可被改動的變數），還會即時向資料庫用 LINE 身分重新查一次角色與在職狀態，
+// 查詢失敗一律拒絕（fail-closed）。need：權限旗標名稱（如 'canApproveExp'）或角色陣列（如 ['owner']）。
+// ⚠️ 這仍是前端檢查，擋不了直接呼叫 API／資料庫的人；真正的強制必須在後端（見交付說明）。
+async function verifyActor(need){
+  const allowed = Array.isArray(need) ? need : Object.keys(ROLES).filter(k=>ROLES[k][need]);
+  const u = S.users[S.role];
+  if(!S.authReady || !allowed.includes(S.role)){ toast('無權限執行此操作','err'); return false; }
+  if(S.demoMode) return true; // 桌面測試模式沒有 LINE 身分可核對
+  if(!S.lineUserId || !u.empId){ toast('身分驗證失敗，請重新開啟系統','err'); return false; }
+  try{
+    const rows = await sbGet('employees', {line_id:'eq.'+S.lineUserId, select:'id,system_role,status'});
+    const me = Array.isArray(rows) ? rows[0] : null;
+    const roleMap = {'老闆':'owner','行政主管':'admin','會計':'accounting'};
+    const dbRole = me ? (roleMap[me.system_role]||'staff') : null;
+    if(!me || me.status!=='active' || me.id!==u.empId || dbRole!==S.role || !allowed.includes(dbRole)){
+      toast('身分核對未通過，無法執行此操作','err'); return false;
+    }
+    return true;
+  }catch(e){
+    console.error('verifyActor 錯誤：', e);
+    toast('身分核對失敗，請稍後再試','err'); return false;
+  }
+}
 const EMP_COLORS=['var(--gold)','var(--green)','var(--blue)','var(--purple)','var(--teal)','var(--orange)'];
 function setRole(r){
-  S.role=r; const role=ROLES[r],user=S.users[r];
+  S.role=r; S.authReady=true; const role=ROLES[r],user=S.users[r];
   document.querySelectorAll('.role-btn').forEach(b=>b.classList.remove('active'));
   document.querySelector(`.role-btn.${r}`).classList.add('active');
   $('uAv').textContent=user.avatar; $('uAv').style.background=role.color; $('uAv').style.color=role.tc;
@@ -1241,6 +1314,7 @@ function setRole(r){
   updateMkEmpSelect(); updateMkShiftSelect();
   // 我的出勤紀錄：換角色就重置選定員工與請假資料範圍，再重新載入
   S_maEmp=null; S_maLeavesReady=false; refreshMyAttendance();
+  reloadRoleScopedData();
   // 安全防護：若切換角色前正停留在對新角色已不可見的頁面（例如薪資頁），強制導回打卡頁，
   // 避免測試用的角色切換器讓敏感內容（如薪資）殘留在畫面上
   const activePage=document.querySelector('.page.active');
@@ -1591,6 +1665,7 @@ function restoreClockBtnHtml(btn){
   if(btn.dataset.origHtml){ btn.innerHTML=btn.dataset.origHtml; delete btn.dataset.origHtml; }
 }
 async function doClockAction(type){
+  if(!S.authReady || !S.users[S.role].empId){ toast('尚未完成身分驗證，請稍候或重新開啟系統','err'); return; }
   const btnIn=$('btnClockIn'), btnOut=$('btnClockOut');
   const activeBtn=type==='in'?btnIn:btnOut;
   if(btnIn)btnIn.disabled=true; if(btnOut)btnOut.disabled=true; // 送出期間先鎖住兩顆，避免連點
@@ -1708,7 +1783,7 @@ async function loadMakeups(){
   try{
     const data=await api('GET','/api/makeups');
     if(Array.isArray(data)){
-      S.makeupRecords=data.map(m=>({id:m.id,empId:m.emp_id,date:m.date,type:m.type,time:m.time,shiftKey:m.shift_key,reason:m.reason,status:m.status||'pending',createdAt:m.created_at}));
+      S.makeupRecords=scopeToViewer(data.map(m=>({id:m.id,empId:m.emp_id,date:m.date,type:m.type,time:m.time,shiftKey:m.shift_key,reason:m.reason,status:m.status||'pending',createdAt:m.created_at})));
       renderMakeupList();
     }
   }catch(e){console.error('loadMakeups 錯誤：',e);}
@@ -1723,11 +1798,12 @@ function changeMkMonth(dir){
 }
 function renderMakeupList(){
   const el=$('mkList'); if(!el)return;
+  if(!S.authReady){ el.innerHTML='<div class="empty">載入中…</div>'; return; }
   const role=ROLES[S.role]; const u=S.users[S.role];
   if($('mkMonthLabel'))$('mkMonthLabel').textContent=S_mkYear+' 年 '+(S_mkMonth+1)+' 月';
   const ym=S_mkYear+'-'+String(S_mkMonth+1).padStart(2,'0');
   // 老闆/行政主管看全部（才能審核），一般員工只看自己的；並依選定月份篩選
-  const list=(role.canViewAll ? S.makeupRecords : S.makeupRecords.filter(m=>m.empId===u.empId))
+  const list=scopeToViewer(S.makeupRecords)
     .filter(m=>(m.date||'').startsWith(ym));
   const sorted=[...list].sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
   if(!sorted.length){ el.innerHTML='<div class="empty">尚無補卡申請</div>'; return; }
@@ -1736,7 +1812,7 @@ function renderMakeupList(){
   const stMap={pending:{l:'待審核',c:'#e6a817'},approved:{l:'已核准',c:'var(--green)'},rejected:{l:'已拒絕',c:'var(--red)'}};
   el.innerHTML=sorted.map(m=>{
     const st=stMap[m.status]||stMap.pending;
-    const canApprove = m.status==='pending' && S.role==='owner';
+    const canApprove = m.status==='pending' && S.role==='owner' && S.authReady;
     return `<div class="log-item" style="flex-direction:column;align-items:stretch;gap:6px">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div><b>${role.canViewAll?empName(m.empId)+'　':''}${m.date}</b>　${typeLabel[m.type]||m.type}　${m.time||''}</div>
@@ -1824,7 +1900,7 @@ function buildMyAttendanceRows(empId, year, month){
     const wd=new Date(Date.UTC(year,month,d)).getUTCDay();
     const v=byDay[ds]||{inT:null,outT:null};
     const sh=getShift(ds);
-    const hol=S.holidays&&S.holidays[ds];
+    const hol=holidayOf(ds);
     const leave=leaves.find(r=>r.status==='approved'&&r.start<=ds&&r.end>=ds);
     const pendingLeave=!leave&&leaves.some(r=>r.status==='pending'&&r.start<=ds&&r.end>=ds);
     const row={ds:ds,wd:wd,rec:v,sched:'—',inT:v.inT,outT:v.outT,work:'—',tags:[],missing:[],pendingMk:[],off:false,alert:false,note:''};
@@ -1936,9 +2012,11 @@ function prefillMakeup(ds, type){
 }
 async function approveMakeup(id){
   if(S.role!=='owner'){toast('只有老闆可核准補卡','err');return;}
+  if(!(await verifyActor(['owner']))) return;
   const mk=S.makeupRecords.find(m=>m.id===id); if(!mk)return;
   try{
-    await api('PATCH','/api/makeups/'+id,{status:'approved'});
+    const r=await api('PATCH','/api/makeups/'+id,{status:'approved'});
+    if(!r) throw new Error('後端無回應，狀態未更新');
     // 核准後，把「員工申請的實際時間」（不是核准當下時間）補進正式打卡紀錄
     const checkedAtUTC = new Date(mk.date+'T'+mk.time+':00+08:00').toISOString();
     await sbPost('checkins', {
@@ -1962,7 +2040,11 @@ async function approveMakeup(id){
 }
 async function rejectMakeup(id){
   if(S.role!=='owner'){toast('只有老闆可拒絕補卡','err');return;}
-  try{ await api('PATCH','/api/makeups/'+id,{status:'rejected'}); }catch(e){ console.error('rejectMakeup 錯誤：', e); }
+  if(!(await verifyActor(['owner']))) return;
+  try{
+    const r=await api('PATCH','/api/makeups/'+id,{status:'rejected'});
+    if(!r) throw new Error('後端無回應，狀態未更新');
+  }catch(e){ console.error('rejectMakeup 錯誤：', e); toast('拒絕失敗，請重試','err'); return; }
   S.makeupRecords=S.makeupRecords.map(m=>m.id===id?Object.assign({},m,{status:'rejected'}):m);
   renderMakeupList(); renderMyAttendance();
   syncTodayClockStatus();
@@ -1973,6 +2055,7 @@ async function submitMakeup(){
   if(!date||!time){toast('請填日期和時間','err');return;}
   if(!reason){toast('請填原因','err');return;}
   const u=S.users[S.role]; const role=ROLES[S.role];
+  if(!role.canMakeup && !u.empId){toast('身份識別失敗，請重新開啟系統','err');return;}
   // 代為補卡：行政/老闆可選對象；一般員工只能補自己
   let targetId=u.empId, targetName=u.name;
   if(role.canMakeup && $('mkEmp') && $('mkEmp').value){
@@ -2352,6 +2435,7 @@ function renderLeaveRecs(){
 }
 async function approveLeave(id){
   if(!ROLES[S.role].canApproveLeave){toast('只有老闆可核准','err');return;}
+  if(!(await verifyActor('canApproveLeave'))) return;
   const rec=S.leaveRecords.find(r=>r.id===id);
   try{ await sbPatch('leave_requests', id, {status:'approved'}); }catch(e){console.error(e);}
   S.leaveRecords=S.leaveRecords.map(r=>r.id===id?Object.assign({},r,{status:'approved'}):r);
@@ -2382,12 +2466,14 @@ async function approveLeave(id){
 }
 async function rejectLeave(id){
   if(!ROLES[S.role].canApproveLeave){toast('只有老闆可拒絕','err');return;}
+  if(!(await verifyActor('canApproveLeave'))) return;
   try{ await sbPatch('leave_requests', id, {status:'rejected'}); }catch(e){console.error(e);}
   S.leaveRecords=S.leaveRecords.map(r=>r.id===id?Object.assign({},r,{status:'rejected'}):r);
   renderLeaveRecs();toast('已拒絕','warn');
 }
 async function deleteLeave(id){
   if(!ROLES[S.role].canDeleteLeave){toast('無權限','err');return;}
+  if(!(await verifyActor('canDeleteLeave'))) return;
   const rec=S.leaveRecords.find(r=>r.id===id);
   // 行政主管只能取消「待核准」的假單；已核准的假單只有老闆能取消
   if(rec && rec.status==='approved' && S.role!=='owner'){
@@ -2502,6 +2588,7 @@ async function submitExpense(){
   if(!desc){toast('請填說明','err');return;}
   if(!S.photoDataUrl){$('photoWarn').style.display='block';toast('請上傳照片','err');return;}
   const u=S.users[S.role];
+  if(!u.empId){toast('身份識別失敗，請重新開啟系統','err');return;}
   const cs=CASES.find(c=>c.id===caseId);
   const caseName=caseId==='custom'?customCaseName:(cs?.name||caseId);
   const catName=cat==='other'?`📎 其他：${customCatName}`:CATS[cat]?.label||cat;
@@ -2526,7 +2613,7 @@ async function submitExpense(){
   $('expCatName').value='';$('catCustomRow').style.display='none';$('expCat').value='material';
   $('photoPreview').style.display='none';$('photoPlaceholder').style.display='block';
   $('photoBox').classList.remove('has-photo');$('photoInput').value='';S.photoDataUrl=null;
-  toast('✅ 代墊申請已送出，等待行政核實','ok');
+  toast('✅ 代墊申請已送出，等待老闆／會計審核','ok');
   // 直接發 LINE 通知
   sendLineMsg(`💳 代墊款申請通知\n\n員工：${u.name}\n案場：${caseName}\n分類：${catName}\n金額：NT$${amt.toLocaleString()}\n說明：${desc}${invoice?'\n發票：'+invoice:''}\n\n請至系統審核 👉\nhttps://liff.line.me/2010371976-U8wLomXx`);
   renderExpensePage();
@@ -2565,6 +2652,8 @@ function expCard(e){
     actions+=`<button class="btn-sm approve" onclick="approveExp(${e.id})">✅ 核准</button><button class="btn-sm reject" onclick="rejectExp(${e.id})">❌ 拒絕</button>`;
   else if(e.status==='pending'&&isOwnClaim&&S.role!=='owner')
     actions+=`<span style="font-size:11px;color:#aaa">⏳ 待其他審核者處理（本人不可自核）</span>`;
+  else if(e.status==='pending'&&S.role==='admin')
+    actions+=`<span style="font-size:11px;color:#aaa">👀 行政僅供覆核內容，核准由老闆／會計處理</span>`;
   if(['approved','admin_ok'].includes(e.status)&&role.canMarkPaid)
     actions+=`<button class="btn-sm paid" onclick="markPaid(${e.id})">💸 已撥款</button>`;
   if(e.status==='paid'&&S.role==='owner')
@@ -2591,6 +2680,7 @@ function expCard(e){
 }
 async function approveExp(id){
   if(!ROLES[S.role].canApproveExp){toast('無權限','err');return;}
+  if(!(await verifyActor('canApproveExp'))) return;
   const exp0=S.expenses.find(e=>e.id===id);
   if(exp0 && exp0.empId===S.users[S.role].empId && S.role!=='owner'){toast('不可審核自己的代墊申請，請由老闆或其他審核者處理','err');return;}
   try{ await sbPatch('expenses', id, {status:'approved'}); }catch(err){console.error('代墊核准寫入失敗:',err);toast('儲存失敗，請重試','err');return;}
@@ -2601,6 +2691,7 @@ async function approveExp(id){
 }
 async function rejectExp(id){
   if(!ROLES[S.role].canApproveExp){toast('無權限','err');return;}
+  if(!(await verifyActor('canApproveExp'))) return;
   const exp0=S.expenses.find(e=>e.id===id);
   if(exp0 && exp0.empId===S.users[S.role].empId && S.role!=='owner'){toast('不可審核自己的代墊申請，請由老闆或其他審核者處理','err');return;}
   try{ await sbPatch('expenses', id, {status:'rejected'}); }catch(err){console.error('代墊拒絕寫入失敗:',err);toast('儲存失敗，請重試','err');return;}
@@ -2611,6 +2702,7 @@ async function rejectExp(id){
 }
 async function markPaid(id){
   if(!ROLES[S.role].canMarkPaid){toast('無權限','err');return;}
+  if(!(await verifyActor('canMarkPaid'))) return;
   const exp=S.expenses.find(e=>e.id===id);
   if(!confirm(`確認已將 NT$${exp?exp.amount.toLocaleString():''} 撥款給「${exp?exp.empName:''}」？\n此動作將記錄撥款時間，作為對帳依據。`))return;
   const paidAt=new Date().toISOString();
@@ -2620,6 +2712,7 @@ async function markPaid(id){
 }
 async function undoPaid(id){
   if(S.role!=='owner'){toast('只有老闆可撤銷撥款狀態','err');return;}
+  if(!(await verifyActor(['owner']))) return;
   const exp=S.expenses.find(e=>e.id===id);
   if(!confirm(`確定撤銷「${exp?exp.empName:''}」NT$${exp?exp.amount.toLocaleString():''} 的已撥款狀態？\n將退回「已核准」，撥款時間紀錄會被清除。`))return;
   try{ await sbPatch('expenses', id, {status:'approved', paid_at:null}); }catch(err){console.error('撤銷撥款寫入失敗:',err);toast('儲存失敗，請重試','err');return;}
@@ -2971,7 +3064,7 @@ function renderCheckinPage(){
         const wd = new Date(ds).getDay();
         const v = (byEmpDay[e.id]||{})[ds];
         const leaveToday = S.leaveRecords.find(function(r){ return r.empId===e.id && r.status==='approved' && r.start<=ds && r.end>=ds; });
-        const holiday = S.holidays && S.holidays[ds];
+        const holiday = holidayOf(ds);
         let status='', statusColor='#333', late=0;
         if(leaveToday){
           const p=leaveToday.dayPart==='am'?'上半天':leaveToday.dayPart==='pm'?'下半天':leaveToday.dayPart==='custom'?leaveToday.customHours+'小時':'全天';
@@ -3338,6 +3431,7 @@ function submitOvertime(){
   if(!reason){toast('請填加班說明','err');return;}
  
   const u=S.users[S.role];
+  if(!u.empId){toast('身份識別失敗，請重新開啟系統','err');return;}
   const CASES_MAP={daily:'🏢 公司日常',interior:'🛋️ 室內設計',graphic:'🎨 平面設計',visual:'👁️ 視覺設計',custom:'✏️ 其他'};
   const siteName=caseId==='custom'?customCase:CASES_MAP[caseId];
  
@@ -3410,13 +3504,16 @@ function renderOvertimePage(){
   }
 }
  
-function approveOt(id){
+async function approveOt(id){
   if(!ROLES[S.role].canApproveLeave){toast('只有老闆可核准','err');return;}
+  if(!(await verifyActor('canApproveLeave'))) return;
   S.overtimes=S.overtimes.map(o=>o.id===id?Object.assign({},o,{status:'approved'}):o);
   api('PATCH','/api/overtimes/'+id,{status:'approved'});
   renderOvertimePage();toast('✅ 加班已核准','ok');
 }
-function rejectOt(id){
+async function rejectOt(id){
+  if(!ROLES[S.role].canApproveLeave){toast('只有老闆可拒絕','err');return;}
+  if(!(await verifyActor('canApproveLeave'))) return;
   S.overtimes=S.overtimes.map(o=>o.id===id?Object.assign({},o,{status:'rejected'}):o);
   api('PATCH','/api/overtimes/'+id,{status:'rejected'});
   renderOvertimePage();toast('已拒絕','warn');
@@ -3497,6 +3594,7 @@ async function initLIFF(){
       }
       // 確認不是 LINE 環境，才是真的在桌面瀏覽器測試：顯示角色切換器讓測試用
       console.log('Demo 模式');
+      S.demoMode=true;
       document.getElementById('roleSw').style.display='flex';
       setRole('owner');
       return;
@@ -3508,6 +3606,7 @@ async function initLIFF(){
 
     const p = await liff.getProfile();
     const lineUserId = p.userId;
+    S.lineUserId = lineUserId; // 供高權限操作前即時核對身分用
 
     // 安全防護①：登入成功後立刻清掉網址列的 code／state 等 LINE OAuth 一次性驗證參數，
     // 避免使用者把網址複製分享出去，讓別人點開後被誤認成原本那個人的身分
@@ -3580,6 +3679,7 @@ async function initLIFF(){
     if(typeof liff !== 'undefined' || isLikelyLineApp()){
       lockDownToStaffError('系統載入異常','請完全關閉 LINE 後重新開啟打卡系統<br>若持續發生請聯絡管理者');
     } else {
+      S.demoMode=true;
       document.getElementById('roleSw').style.display='flex';
     }
   }
@@ -3598,9 +3698,8 @@ async function initLIFF(){
   // 載入員工資料後再初始化 LIFF
   loadEmployees().then(()=>{
     initLIFF();
-    loadOvertimes().then(()=>{ try{renderOvertimePage();renderLeaveGrid();}catch(e){} });
-    loadMakeups();
-    { const _role=ROLES[S.role]; const _u=S.users[S.role]; loadExpenses(_role.canViewAll ? null : _u.empId); }
+    // 補卡／代墊／加班等「依身分分範圍」的資料，不在這裡載入（此時 LIFF 身分尚未確定），
+    // 改由 setRole() → reloadRoleScopedData() 在身分確定後載入
     loadAllCheckins().then(()=>renderMyAttendance());
     startVersionWatcher();
     loadHolidays().then(()=>{
