@@ -613,12 +613,13 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 <div class="page" id="page-checkin">
   <div class="pg-title">出勤紀錄</div>
   <div class="pg-sub">遲到與請假總覽（老闆／會計／行政主管）</div>
-  <div style="display:flex;gap:0;margin:0 14px 12px;border-radius:12px;overflow:hidden;border:1.5px solid var(--gold)">
-    <button id="ckTab1" onclick="switchCkTab(1)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:var(--gold);color:#1a1808;cursor:pointer">🔴 遲到總覽</button>
-    <button id="ckTab2" onclick="switchCkTab(2)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">📋 請假總覽</button>
-    <button id="ckTab3" onclick="switchCkTab(3)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">🏆 全勤名單</button>
-    <button id="ckTab4" onclick="switchCkTab(4)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">📅 每日明細</button>
-    <button id="ckTab5" onclick="switchCkTab(5)" style="flex:1;padding:9px 0;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">🌿 假期總覽</button>
+  <div style="display:flex;gap:0;margin:0 14px 12px;border-radius:12px;overflow-x:auto;border:1.5px solid var(--gold)">
+    <button id="ckTab1" onclick="switchCkTab(1)" style="flex:1 0 auto;padding:9px 10px;white-space:nowrap;font-size:13px;font-weight:900;border:none;background:var(--gold);color:#1a1808;cursor:pointer">🔴 遲到總覽</button>
+    <button id="ckTab2" onclick="switchCkTab(2)" style="flex:1 0 auto;padding:9px 10px;white-space:nowrap;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">📋 請假總覽</button>
+    <button id="ckTab3" onclick="switchCkTab(3)" style="flex:1 0 auto;padding:9px 10px;white-space:nowrap;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">🏆 全勤名單</button>
+    <button id="ckTab4" onclick="switchCkTab(4)" style="flex:1 0 auto;padding:9px 10px;white-space:nowrap;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">📅 每日明細</button>
+    <button id="ckTab5" onclick="switchCkTab(5)" style="flex:1 0 auto;padding:9px 10px;white-space:nowrap;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">🌿 假期總覽</button>
+    <button id="ckTab6" onclick="switchCkTab(6)" style="flex:1 0 auto;padding:9px 10px;white-space:nowrap;font-size:13px;font-weight:900;border:none;background:none;color:var(--gold);cursor:pointer">📊 月結摘要</button>
   </div>
   <div id="ckMonthRow" style="display:flex;align-items:center;gap:8px;margin:0 14px 10px">
     <button onclick="changeCkMonth(-1)" style="border:none;background:var(--mist);border-radius:8px;padding:6px 14px;font-size:18px;cursor:pointer">‹</button>
@@ -2948,11 +2949,11 @@ function renderPerfectAttendanceHTML(year, month){
 }
  
 /* ════════════════════════════════════════
-   獨立「出勤」分頁（老闆／會計／行政主管，永不顯示薪資金額）
+   獨立「出勤」分頁（老闆／會計／行政主管；不顯示薪資，僅月結摘要含「預估遲到扣款」供參考）
 ════════════════════════════════════════ */
 let S_ckMonth = new Date().getMonth();
 let S_ckYear  = new Date().getFullYear();
-let S_ckTab   = 1; // 1=遲到總覽 2=請假總覽 3=全勤名單 4=每日明細 5=假期總覽
+let S_ckTab   = 1; // 1=遲到總覽 2=請假總覽 3=全勤名單 4=每日明細 5=假期總覽 6=月結摘要
 let S_ckDept  = 'all'; // 每日明細用：部門篩選
 let S_ckEmp   = 'all'; // 每日明細用：單一員工篩選
 
@@ -2976,8 +2977,9 @@ function changeCkMonth(dir){
   renderCheckinPage();
 }
 function switchCkTab(n){
+  if(!ROLES[S.role].canViewAll) return; // 出勤分頁僅老闆／行政主管／會計
   S_ckTab = n;
-  [1,2,3,4,5].forEach(function(i){
+  [1,2,3,4,5,6].forEach(function(i){
     const btn=$('ckTab'+i); if(!btn) return;
     btn.style.background = n===i ? 'var(--gold)' : 'none';
     btn.style.color      = n===i ? '#1a1808'     : 'var(--gold)';
@@ -3009,6 +3011,124 @@ function onCkEmpChange(){
   renderCheckinPage();
 }
  
+/* ════════════════════════════════════════
+   月結摘要（老闆／行政主管／會計）
+   讓月底結算不用手動加總打卡：一位在職員工一列。
+   遲到分鐘、緩衝、超出、扣款全部直接取自 calcMonthlyStats（薪資頁同一份計算：固定 09:30 基準、
+   月緩衝 30 分、超出每分鐘 NT$3），數字與薪資頁一致；這裡的扣款僅供參考，實際以薪資頁為準。
+   資料來源：checkins（S.allCheckins）、leave_requests（S.leaveRecords）、國定假日常數／holidays 表（holidayOf）
+════════════════════════════════════════ */
+const MS_HEADERS=['姓名（職稱）','應出勤天數','實際出勤天數','缺卡天數','總遲到分鐘','本月緩衝已用分鐘','超出緩衝分鐘','預估遲到扣款（NT$，僅供參考）'];
+let _msLeaveLoading=false;
+function msFmtDays(n){ return Number.isInteger(n) ? String(n) : n.toFixed(1); }
+function msEsc(v){ return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+// 單日請假折抵的出勤比例：全天 1、上／下半天 0.5、自訂小時 ÷8（同一天多筆最多折抵 1）
+function msLeaveFraction(leavesOfDay){
+  let f=0;
+  leavesOfDay.forEach(function(r){
+    f += (r.dayPart==='am'||r.dayPart==='pm') ? 0.5 : (r.dayPart==='custom' ? Math.min(1,(Number(r.customHours)||0)/8) : 1);
+  });
+  return Math.min(1,f);
+}
+function buildMonthlySummary(year, month){
+  const todayStr=today();
+  const daysInMonth=new Date(year,month+1,0).getDate();
+  const ymFirst=year+'-'+String(month+1).padStart(2,'0')+'-01';
+  // 全公司打卡只載入最近 3000 筆：若這個月的資料落在載入範圍之外，數字會偏低（薪資頁同樣受影響），要提醒
+  const all=S.allCheckins||[];
+  const oldest=(all.length>=3000)?tDateStr(all[all.length-1].checked_at):null;
+  const truncated=!!(oldest && ymFirst<=oldest);
+  const rows=S.employees.filter(function(e){ return e.status==='active'; }).map(function(e){
+    const st=calcMonthlyStats(e.id,year,month);
+    const hire=e.hireDate?String(e.hireDate).slice(0,10):null;
+    const leaves=S.leaveRecords.filter(function(r){ return r.empId===e.id && r.status==='approved'; });
+    let expected=0, missing=0;
+    for(let d=1; d<=daysInMonth; d++){
+      const ds=year+'-'+String(month+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+      if(hire && ds<hire) continue;                       // 到職日之前不計
+      const wd=new Date(Date.UTC(year,month,d)).getUTCDay();
+      if(wd===0||wd===6) continue;                        // 週末
+      if(holidayOf(ds)) continue;                         // 國定假日／停班日
+      const ls=leaves.filter(function(r){ return r.start<=ds && r.end>=ds; });
+      expected += 1-msLeaveFraction(ls);
+      if(ls.length) continue;                             // 當天有請假紀錄：不算缺卡
+      if(ds>=todayStr) continue;                          // 今天（含）以後還沒結束，不判定缺卡
+      const v=st.days[ds];
+      if(!(v && v.in && v.out)) missing++;
+    }
+    const attended=Object.keys(st.days).filter(function(k){ return st.days[k].in; }).length;
+    return {
+      e:e,
+      name:e.name+(e.role?'（'+e.role+'）':''),
+      expected:expected, attended:attended, missing:missing,
+      lateMins:st.totalLateMins,
+      bufUsed:st.totalLateMins-st.overMins,               // 緩衝上限 30 分（與 calcMonthlyStats 相同）
+      overMins:st.overMins,
+      penalty:st.penalty
+    };
+  });
+  return {rows:rows, truncated:truncated};
+}
+function renderMonthlySummarySection(){
+  if(!ROLES[S.role].canViewAll) return '<div class="empty">無權限</div>';
+  // 請假資料尚未載入時先補載（否則請假日會被誤判成缺卡）
+  if(S.allCheckins===undefined || !S_maLeavesReady){
+    if(!_msLeaveLoading){
+      _msLeaveLoading=true;
+      refreshMyAttendance().then(function(){ _msLeaveLoading=false; if(S_ckTab===6) renderCheckinPage(); });
+    }
+    return '<div class="empty">載入中…</div>';
+  }
+  const r=buildMonthlySummary(S_ckYear,S_ckMonth);
+  const th='padding:6px 4px;font-size:11px;color:#aaa';
+  const td='padding:8px 4px;text-align:center;font-size:12px';
+  const body=r.rows.map(function(x){
+    const bg=x.missing>0?'background:var(--red-lt);':'';
+    return '<tr style="border-bottom:1px solid var(--rule);'+bg+'">'+
+      '<td style="padding:8px 4px;font-weight:700;font-size:12px;white-space:nowrap">'+msEsc(x.name)+'</td>'+
+      '<td style="'+td+'">'+msFmtDays(x.expected)+'</td>'+
+      '<td style="'+td+'">'+x.attended+'</td>'+
+      '<td style="'+td+';font-weight:900;color:'+(x.missing>0?'var(--red)':'#bbb')+'">'+x.missing+'</td>'+
+      '<td style="'+td+';color:'+(x.lateMins>0?'var(--red)':'#bbb')+'">'+x.lateMins+'</td>'+
+      '<td style="'+td+'">'+x.bufUsed+'</td>'+
+      '<td style="'+td+';color:'+(x.overMins>0?'var(--red)':'#bbb')+'">'+x.overMins+'</td>'+
+      '<td style="'+td+';color:'+(x.penalty>0?'var(--red)':'#bbb')+'">'+(x.penalty>0?'NT$'+x.penalty.toLocaleString():'-')+'</td></tr>';
+  }).join('');
+  return '<div class="section"><div class="sec-head">📊 月結摘要 <button onclick="exportMonthlySummaryCsv()" style="font-size:11px;padding:3px 10px;border:none;border-radius:8px;background:var(--gold);color:var(--dark);font-weight:700;cursor:pointer">⬇️ 匯出 CSV</button></div>'+
+    '<div style="margin:0 14px 8px;padding:8px 10px;background:var(--gold-lt);border-radius:8px;font-size:11px;color:#8a6d00;font-weight:700;line-height:1.6">'+
+      '⚠️ 「預估遲到扣款」＝超出緩衝分鐘 × NT$3，僅供參考；實際扣款以薪資頁為準。</div>'+
+    (r.truncated?'<div style="margin:0 14px 8px;padding:8px 10px;background:var(--red-lt);border-radius:8px;font-size:11px;color:var(--red);font-weight:700;line-height:1.6">⚠️ 這個月的部分打卡資料超出系統載入範圍（僅載入最近 3000 筆），數字可能偏低，請勿直接用來結算。</div>':'')+
+    '<div style="overflow-x:auto;padding:4px 14px"><table style="width:100%;border-collapse:collapse;min-width:760px">'+
+    '<tr style="border-bottom:2px solid var(--gold)"><th style="'+th+';text-align:left">'+MS_HEADERS[0]+'</th>'+MS_HEADERS.slice(1).map(function(h){ return '<th style="'+th+'">'+h+'</th>'; }).join('')+'</tr>'+
+    (body||'<tr><td colspan="8" style="padding:14px;color:#bbb;text-align:center">無在職員工資料</td></tr>')+
+    '</table></div>'+
+    '<div style="padding:0 14px 10px;font-size:10px;color:#bbb;line-height:1.7">'+
+      '應出勤＝當月工作日（扣週末、國定假日／停班日、已核准請假；半天假扣 0.5 天）｜缺卡＝應出勤日沒有完整上下班卡且當天無請假紀錄，只統計到昨天｜遲到以 09:30 為基準，緩衝每月 30 分（與薪資頁相同）｜淡紅底＝有缺卡</div>'+
+    '</div>';
+}
+function exportMonthlySummaryCsv(){
+  if(!ROLES[S.role].canViewAll){ toast('無權限','err'); return; }
+  const r=buildMonthlySummary(S_ckYear,S_ckMonth);
+  if(!r.rows.length){ toast('目前無在職員工資料可匯出','warn'); return; }
+  if(r.truncated && !confirm('這個月的部分打卡資料超出系統載入範圍，匯出的數字可能偏低。仍要匯出嗎？')) return;
+  const csvRows=r.rows.map(function(x){
+    return [x.name, msFmtDays(x.expected), x.attended, x.missing, x.lateMins, x.bufUsed, x.overMins, x.penalty];
+  });
+  const csv='\ufeff'+[MS_HEADERS].concat(csvRows).map(function(row){
+    return row.map(function(v,i){
+      let t=String(v);
+      if(i===0 && /^[=+\-@]/.test(t)) t="'"+t; // 避免姓名被試算表當成公式執行
+      return '"'+t.replace(/"/g,'""')+'"';
+    }).join(',');
+  }).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download='月結摘要_'+S_ckYear+'-'+String(S_ckMonth+1).padStart(2,'0')+'.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function renderCheckinPage(){
   $('ckMonthLabel').textContent = S_ckYear+' 年 '+(S_ckMonth+1)+' 月';
   const ym = S_ckYear+'-'+String(S_ckMonth+1).padStart(2,'0');
@@ -3106,6 +3226,9 @@ function renderCheckinPage(){
   } else if(S_ckTab === 5){
     // 假期總覽
     $('ckContent').innerHTML = renderLeaveOverviewSection();
+  } else if(S_ckTab === 6){
+    // 月結摘要
+    $('ckContent').innerHTML = renderMonthlySummarySection();
   } else {
     // 請假總覽
     const leaveList=actEmps.map(function(e){const leaves=S.leaveRecords.filter(function(r){return r.empId===e.id&&r.status==='approved'&&(r.start||'').startsWith(ym);});return {e,leaves};}).filter(function(x){return x.leaves.length>0;});
@@ -3526,6 +3649,10 @@ function switchPage(n){
   // 薪資頁只有 owner／會計可見，行政主管等其他角色一律擋下並導回打卡頁
   if(n==='salary' && !ROLES[S.role].canViewSalary){
     toast('無權限查看薪資頁','err');
+    n='home';
+  }
+  if(n==='checkin' && !ROLES[S.role].canViewAll){
+    toast('無權限查看出勤頁','err');
     n='home';
   }
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
