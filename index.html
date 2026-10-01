@@ -882,6 +882,10 @@ async function loadEmployees() {
         remotePunch: e.remote_punch || false,
         prenatalEnabled: !!e.prenatal_enabled,
         prenatalUsed: e.prenatal_used || 0,
+        openingAnnualUsed: Number(e.opening_annual_used) || 0,     // 期初（NUEiP 時代）已用特休 h
+        openingCompBalance: Number(e.opening_comp_balance) || 0,   // 期初補休剩餘 h
+        openingSickUsed: Number(e.opening_sick_used) || 0,         // 2026 年度期初已用病假 h
+        openingPersonalUsed: Number(e.opening_personal_used) || 0, // 2026 年度期初已用事假 h
       }));
       console.log('員工資料載入成功：', S.employees.length, '人');
       renderEmpList();
@@ -2141,48 +2145,44 @@ function saveShift(ds){
 /* ════════════════════════════════════════
    請假
 ════════════════════════════════════════ */
-function calcAnnualLeave(h){
-  const hire=new Date(h),t=new Date();const months=(t.getFullYear()-hire.getFullYear())*12+(t.getMonth()-hire.getMonth());
-  if(months<6)return 0;if(months<12)return 3;const y=Math.floor(months/12);
-  if(y<2)return 7;if(y<3)return 10;if(y<5)return 14;if(y<10)return 15;return Math.min(15+(y-10),30);
+/* 系統切換日：NUEiP 最終資料基準日是 2026-09-30（已含九月在 NUEiP 登記的所有請假），2026-10-01 起以本系統為準。
+   特休／補休／病假／事假的計算全部共用這個常數：
+   · 切換日之前的使用量＝employees 表的 opening_* 期初欄位（由 NUEiP 核算後一次性帶入）
+   · 系統內「請假日早於切換日」的紀錄一律不計入，避免和期初欄位重複扣 */
+const CUTOVER_DATE='2026-10-01';
+// 'YYYY-MM-DD'（或 Date）→ 當地時間 00:00 的 Date；避免 new Date('YYYY-MM-DD') 以 UTC 解析造成的 8 小時偏差
+function parseYmd(x){
+  if(x instanceof Date) return new Date(x.getFullYear(),x.getMonth(),x.getDate());
+  const m=String(x).slice(0,10).split('-').map(Number);
+  return new Date(m[0],m[1]-1,m[2]);
+}
+function leaveDayPartH(r){ return (r.dayPart==='am'||r.dayPart==='pm')?4:8; }
+// 一筆假單落在 [from,to]（含，YYYY-MM-DD）內的時數；多日假單按日切，只算落在區間內的工作日
+function leaveHoursInRange(r,from,to){
+  if(r.dayPart==='custom') return (r.start>=from&&r.start<=to)?(Number(r.customHours)||0):0;
+  const s=r.start>from?r.start:from, e=r.end<to?r.end:to;
+  return s>e?0:weekdaysBetween(s,e)*leaveDayPartH(r);
 }
 /* ── 假別餘額（特休週年制、補休 1:1）── */
 function weekdaysBetween(s,e){
-  let c=0;const d=new Date(s),end=new Date(e);
+  let c=0;const d=parseYmd(s),end=parseYmd(e);
   while(d<=end){
     const w=d.getDay();
-    const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-    if(w!==0&&w!==6&&!isHoliday(ds))c++;
+    if(w!==0&&w!==6&&!isHoliday(ymd(d)))c++;
     d.setDate(d.getDate()+1);
   }
   return c;
 }
-function annualWindow(hireDate){
-  const h=new Date(hireDate),t=new Date();
-  let s=new Date(t.getFullYear(),h.getMonth(),h.getDate());
-  if(s>t)s=new Date(t.getFullYear()-1,h.getMonth(),h.getDate());
-  const e=new Date(s);e.setFullYear(e.getFullYear()+1);e.setDate(e.getDate()-1);
-  return [s,e];
-}
+// 請假頁／員工管理頁／送出請假時的餘額檢查都走這裡，內部直接用假期總覽的精確週年制計算，兩邊數字不會不一致
 function calcLeaveBalance(empId,hireDate){
-  const hd=hireDate||'2024-01-15';
-  const entitle=calcAnnualLeave(hd);
-  const entitleH=entitle*8;
-  const [ws,we]=annualWindow(hd);
-  const partH=r=>r.dayPart==='custom'?(Number(r.customHours)||0):((r.dayPart==='am'||r.dayPart==='pm')?4:8);
-  const recH=r=>r.dayPart==='custom'?(Number(r.customHours)||0):weekdaysBetween(r.start,r.end)*partH(r);
-  let usedAnnualH=0;
-  S.leaveRecords.filter(r=>r.empId===empId&&r.type==='annual'&&r.status==='approved').forEach(r=>{
-    if(r.dayPart==='custom'){usedAnnualH+=recH(r);return;}
-    const s=new Date(r.start)<ws?ws:new Date(r.start);
-    const e=new Date(r.end)>we?we:new Date(r.end);
-    if(s<=e)usedAnnualH+=weekdaysBetween(s,e)*partH(r);
-  });
-  // 補休半年內有效：只計最近 6 個月的加班與補休
-  const sixAgo=new Date();sixAgo.setMonth(sixAgo.getMonth()-6);sixAgo.setHours(0,0,0,0);
-  const compEarnedH=S.overtimes.filter(o=>o.empId===empId&&o.status==='approved'&&new Date(o.date)>=sixAgo).reduce((t,o)=>t+(Number(o.hours)||0),0);
-  const compUsedH=S.leaveRecords.filter(r=>r.empId===empId&&r.type==='comp'&&r.status==='approved'&&new Date(r.start)>=sixAgo).reduce((t,r)=>t+recH(r),0);
-  return {entitle,entitleH,usedAnnualH,annualRemainH:entitleH-usedAnnualH,compEarnedH,compUsedH,compRemainH:compEarnedH-compUsedH};
+  const emp=S.employees.find(e=>e.id===empId)||{id:empId,hireDate:hireDate};
+  const asOf=new Date();
+  const a=calcAnnualOverview(emp,asOf), c=calcCompOverview(emp,asOf);
+  return {
+    entitle:a.noneYet?0:a.days, entitleH:a.noneYet?0:a.totalH,
+    usedAnnualH:a.noneYet?0:a.usedH, annualRemainH:a.noneYet?0:a.remainH,
+    compEarnedH:c.earnedH, compUsedH:c.usedH, compRemainH:c.remainH
+  };
 }
 /* ── 假期總覽頁（管理者）專用：精確週年制分期計算 ──
    規則：到職滿半年才有第一期（3天），有效期至滿1年週年日前一天；
@@ -2197,7 +2197,7 @@ function annualTierDays(y){ // y=0 代表到職滿半年～滿1年那一期；y>
   return Math.min(15+(y-10),30);
 }
 function currentAnnualWindow(hireDate,asOf){
-  const hd=new Date(hireDate||'2024-01-15');
+  const hd=parseYmd(hireDate||'2024-01-15');
   const half=new Date(hd);half.setMonth(half.getMonth()+6);
   if(asOf<half)return null; // 未滿半年，尚無額度
   const yr1=new Date(hd);yr1.setFullYear(yr1.getFullYear()+1);
@@ -2221,37 +2221,53 @@ function calcAnnualOverview(emp,asOf){
   const win=currentAnnualWindow(emp.hireDate,asOf);
   if(!win)return {noneYet:true};
   const ws=ymd(win.start), we=ymd(win.end);
-  const partH=r=>r.dayPart==='custom'?(Number(r.customHours)||0):((r.dayPart==='am'||r.dayPart==='pm')?4:8);
-  const usedH=S.leaveRecords.filter(r=>r.empId===emp.id&&r.type==='annual'&&r.status==='approved'&&r.start>=ws&&r.start<=we)
-    .reduce((t,r)=>t+(r.dayPart==='custom'?(Number(r.customHours)||0):weekdaysBetween(r.start,r.end)*partH(r)),0);
+  // 期間跨新舊系統（起算日早於切換日）：已用＝期初已用量（opening_annual_used）＋切換日起系統內已核准的特休；
+  // 全新一期（起算日在切換日之後）：與舊系統無關，只算系統內紀錄。兩種情況系統內早於切換日的紀錄都不計。
+  const crosses = ws < CUTOVER_DATE;
+  const from = crosses ? CUTOVER_DATE : ws;
+  const openingUsedH = crosses ? (Number(emp.openingAnnualUsed)||0) : 0;
+  const sysUsedH = S.leaveRecords.filter(r=>r.empId===emp.id&&r.type==='annual'&&r.status==='approved')
+    .reduce((t,r)=>t+leaveHoursInRange(r,from,we),0);
+  const usedH = openingUsedH + sysUsedH;
   const totalH=win.days*8;
-  return {noneYet:false,start:win.start,end:win.end,days:win.days,totalH,usedH,remainH:Math.max(0,totalH-usedH)};
+  return {noneYet:false,start:win.start,end:win.end,days:win.days,totalH,usedH,openingUsedH,sysUsedH,remainH:Math.max(0,totalH-usedH)};
 }
 function calcCompOverview(emp,asOf){
   const sixAgo=new Date(asOf);sixAgo.setMonth(sixAgo.getMonth()-6);
-  const earns=S.overtimes.filter(o=>o.empId===emp.id&&o.status==='approved'&&new Date(o.date)>=sixAgo)
-    .map(o=>({date:o.date,hours:Number(o.hours)||0})).sort((a,b)=>a.date.localeCompare(b.date));
-  const partH=r=>r.dayPart==='custom'?(Number(r.customHours)||0):((r.dayPart==='am'||r.dayPart==='pm')?4:8);
-  let usedH=S.leaveRecords.filter(r=>r.empId===emp.id&&r.type==='comp'&&r.status==='approved'&&new Date(r.start)>=sixAgo)
-    .reduce((t,r)=>t+(r.dayPart==='custom'?(Number(r.customHours)||0):weekdaysBetween(r.start,r.end)*partH(r)),0);
-  // 先進先出：已使用的補休優先扣抵最早的加班時數，剩餘者各自依自己的加班日期＋6個月推算到期日
-  let remainH=0,nearestExpire=null;
+  const sixAgoStr=ymd(sixAgo);
+  // 切換日前的加班／補休已包含在期初餘額（opening_comp_balance）內，系統內只算切換日起的紀錄
+  const from=sixAgoStr>CUTOVER_DATE?sixAgoStr:CUTOVER_DATE;
+  const earns=S.overtimes.filter(o=>o.empId===emp.id&&o.status==='approved'&&String(o.date).slice(0,10)>=from)
+    .map(o=>({date:String(o.date).slice(0,10),hours:Number(o.hours)||0})).sort((a,b)=>a.date.localeCompare(b.date));
+  const totalUsedH=S.leaveRecords.filter(r=>r.empId===emp.id&&r.type==='comp'&&r.status==='approved')
+    .reduce((t,r)=>t+leaveHoursInRange(r,from,'9999-12-31'),0);
+  // 期初補休是切換日前取得的，補休半年有效，超過切換日 6 個月就視為到期歸零（期初沒有逐筆到期日，暫不另外處理）
+  const openingH=(sixAgoStr<=CUTOVER_DATE)?(Number(emp.openingCompBalance)||0):0;
+  // 先進先出：期初餘額最早取得、最先被扣；其後的加班依自己的加班日期＋6個月推算到期日
+  let usedH=totalUsedH, openLeft=openingH;
+  const useOpen=Math.min(openLeft,usedH); openLeft-=useOpen; usedH-=useOpen;
+  let remainH=openLeft,nearestExpire=null;
   earns.forEach(function(e){
     let avail=e.hours;
     if(usedH>0){ const used=Math.min(avail,usedH); avail-=used; usedH-=used; }
     if(avail>0){
       remainH+=avail;
-      const expire=new Date(e.date);expire.setMonth(expire.getMonth()+6);
+      const expire=parseYmd(e.date);expire.setMonth(expire.getMonth()+6);
       if(!nearestExpire||expire<nearestExpire)nearestExpire=expire;
     }
   });
-  return {remainH,expire:nearestExpire};
+  return {remainH,expire:nearestExpire,earnedH:openingH+earns.reduce((t,e)=>t+e.hours,0),usedH:totalUsedH};
 }
 function calcYearLeaveUsedH(empId,type,asOf){
-  const yStart=asOf.getFullYear()+'-01-01', yEnd=asOf.getFullYear()+'-12-31';
-  const partH=r=>r.dayPart==='custom'?(Number(r.customHours)||0):((r.dayPart==='am'||r.dayPart==='pm')?4:8);
-  return S.leaveRecords.filter(r=>r.empId===empId&&r.type===type&&r.status==='approved'&&r.start>=yStart&&r.start<=yEnd)
-    .reduce((t,r)=>t+(r.dayPart==='custom'?(Number(r.customHours)||0):weekdaysBetween(r.start,r.end)*partH(r)),0);
+  const y=asOf.getFullYear();
+  const yStart=y+'-01-01', yEnd=y+'-12-31';
+  const emp=S.employees.find(e=>e.id===empId)||{};
+  // 切換日所在年度（2026）：已用＝期初已用量＋切換日起系統內的紀錄；其他年度：全年系統內紀錄
+  const inCutYear = (y===Number(CUTOVER_DATE.slice(0,4)));
+  const from = (inCutYear && yStart<CUTOVER_DATE) ? CUTOVER_DATE : yStart;
+  const openingH = inCutYear ? ({sick:emp.openingSickUsed,personal:emp.openingPersonalUsed}[type]||0) : 0;
+  return (Number(openingH)||0) + S.leaveRecords.filter(r=>r.empId===empId&&r.type===type&&r.status==='approved')
+    .reduce((t,r)=>t+leaveHoursInRange(r,from,yEnd),0);
 }
 function fmtDaysH(h){
   const d=Math.floor(h/8),r=h%8;
@@ -2260,6 +2276,7 @@ function fmtDaysH(h){
   return `${r} 小時`;
 }
 function empBalStr(e){
+  if(e.status!=='active') return '已停用（不計假期餘額）';
   const b=calcLeaveBalance(e.id,e.hireDate);
   return `特休剩 ${fmtDaysH(b.annualRemainH)}／共 ${b.entitle} 天｜補休剩 ${b.compRemainH} 小時`;
 }
