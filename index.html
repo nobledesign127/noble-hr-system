@@ -731,11 +731,11 @@ header::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:20p
 ════════════════════════════════════════ */
 const ROLES = {
   owner:      { label:'老闆',    color:'var(--gold)',  tc:'var(--dark)',
-    canApproveLeave:true, canDeleteLeave:true, canMakeup:true, canEditSchedule:true,
+    canApproveLeave:true, canApproveMakeup:true, canDeleteLeave:true, canMakeup:true, canEditSchedule:true,
     canAddEmp:true, canDisableEmp:true, canViewAll:true,
     canViewSalary:true, canEditSalary:true, canApproveExp:true, canMarkPaid:true },
   admin:      { label:'行政主管', color:'#60A5FA', tc:'var(--dark)',
-    canApproveLeave:false, canDeleteLeave:true, canMakeup:true, canEditSchedule:true,
+    canApproveLeave:false, canApproveMakeup:true, canDeleteLeave:true, canMakeup:true, canEditSchedule:true,
     canAddEmp:true, canDisableEmp:false, canViewAll:true,
     canViewSalary:false, canEditSalary:false, canApproveExp:false, canMarkPaid:false },
   accounting: { label:'會計',    color:'#34D399', tc:'var(--dark)',
@@ -851,17 +851,24 @@ async function sendLineMsg(msg){
 }
  
 // 通用 API 呼叫
-async function api(method, path, body) {
+// timeoutMs（選填）：超過時間就中止請求（AbortController），並回傳 {timeout:true}；沒給就不設逾時
+async function api(method, path, body, timeoutMs) {
+  const ctrl = timeoutMs ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
   try {
     const res = await fetch(API_BASE + path, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: body ? JSON.stringify(body) : undefined,
+      signal: ctrl ? ctrl.signal : undefined,
     });
     return await res.json();
   } catch(e) {
+    if(e && e.name==='AbortError'){ console.error('API 逾時', path); return {timeout:true}; }
     console.error('API 錯誤', e);
     return null;
+  } finally {
+    if(timer) clearTimeout(timer);
   }
 }
  
@@ -1367,6 +1374,14 @@ function renderShiftCard(ds){
 function isPrenatalExemptDay(empId, dateStr){
   return S.leaveRecords.some(r=>r.empId===empId && r.type==='checkup' && r.status==='approved' && r.start<=dateStr && r.end>=dateStr);
 }
+// 非上班日：週末、國定假日、資料庫 holidays（含政府公告停班日）。這些日子的打卡不計遲到、不標缺卡。
+// 例外：當天排了自訂班別（custom）時，仍依該班別計算。
+// 注意：自訂班別目前只存在瀏覽器記憶體（S.schedule），沒有寫入資料庫，月報等統計看不到別人的自訂班別。
+function isNonWorkday(ds){
+  if(S.schedule && S.schedule[ds]==='custom') return false;
+  const wd=new Date(Date.UTC(+ds.slice(0,4),+ds.slice(5,7)-1,+ds.slice(8,10))).getUTCDay();
+  return wd===0 || wd===6 || !!holidayOf(ds);
+}
 function calcLate(t,sh){
   const nowM=t.getHours()*60+t.getMinutes();
   const startM=sh.startH*60+(sh.startM||0);
@@ -1404,6 +1419,7 @@ setLogDateLabel();
  
 function updateBannerLive(n){
   const sh=getShift(); const b=$('lateBanner');
+  if(isNonWorkday(tDateStr(Date.now()))){ b.className='banner info'; b.textContent='🎉 今天非上班日，打卡不計遲到'; return; }
   const nowM=n.getHours()*60+n.getMinutes();
   let adjM=nowM; if(sh.cross&&nowM<sh.startH*60)adjM=nowM+1440;
   const startM=sh.startH*60+(sh.startM||0);
@@ -1644,6 +1660,7 @@ async function syncMonthlyBuffer(){
     const GRACE = '09:30';
     let totalLateMins = 0;
     Object.entries(days).forEach(([ds,t])=>{
+      if(isNonWorkday(ds)) return; // 週末／國定假日／停班日的打卡不計遲到
       if(isPrenatalExemptDay(u.empId, ds)) return; // 產檢假半天不計入遲到緩衝
       if(t > GRACE){
         const gp=[9,30], tp=t.split(':').map(Number);
@@ -1685,7 +1702,7 @@ async function doClockAction(type){
   const near=OFFICES.filter(o=>o.lat).map(o=>({o,d:hav(S.gps?.la||0,S.gps?.lo||0,o.lat,o.lng)})).sort((a,b)=>a.d-b.d)[0];
   if(type==='in'){
     // 產檢假當天（上／下半天）不列入遲到判定：以「準時到班」計算，避免因半天假造成的較晚到班被誤判遲到扣款
-    const c=isPrenatalExemptDay(S.users[S.role].empId,today())
+    const c=(isPrenatalExemptDay(S.users[S.role].empId,today())||isNonWorkday(tDateStr(Date.now())))
       ? calcLate(new Date(now.getFullYear(),now.getMonth(),now.getDate(),sh.startH,sh.startM||0),sh)
       : calcLate(now,sh);
     S.clockedIn=true;S.inTime=ts;S.inDate=today();
@@ -1817,7 +1834,8 @@ function renderMakeupList(){
   const stMap={pending:{l:'待審核',c:'#e6a817'},approved:{l:'已核准',c:'var(--green)'},rejected:{l:'已拒絕',c:'var(--red)'}};
   el.innerHTML=sorted.map(m=>{
     const st=stMap[m.status]||stMap.pending;
-    const canApprove = m.status==='pending' && S.role==='owner' && S.authReady;
+    // 老闆、行政主管可核准補卡；行政主管不能核准自己的補卡（老闆不受限）
+    const canApprove = m.status==='pending' && role.canApproveMakeup && S.authReady && !(S.role!=='owner' && m.empId===u.empId);
     return `<div class="log-item" style="flex-direction:column;align-items:stretch;gap:6px">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div><b>${role.canViewAll?empName(m.empId)+'　':''}${m.date}</b>　${typeLabel[m.type]||m.type}　${m.time||''}</div>
@@ -2016,9 +2034,10 @@ function prefillMakeup(ds, type){
   toast('已帶入 '+ds+(type==='in'?' 上班卡':' 下班卡')+'，請填時間與原因','ok');
 }
 async function approveMakeup(id){
-  if(S.role!=='owner'){toast('只有老闆可核准補卡','err');return;}
-  if(!(await verifyActor(['owner']))) return;
+  if(!ROLES[S.role].canApproveMakeup){toast('只有老闆和行政主管可核准補卡','err');return;}
+  if(!(await verifyActor(['owner','admin']))) return;
   const mk=S.makeupRecords.find(m=>m.id===id); if(!mk)return;
+  if(S.role!=='owner' && mk.empId===S.users[S.role].empId){toast('不能核准自己申請的補卡，請老闆處理','err');return;}
   try{
     const r=await api('PATCH','/api/makeups/'+id,{status:'approved'});
     if(!r) throw new Error('後端無回應，狀態未更新');
@@ -2044,8 +2063,10 @@ async function approveMakeup(id){
   sendLineMsg(`✅ 補卡核准通知\n\n員工：${empName}\n日期：${mk.date}\n類型：${mk.type==='in'?'上班卡':'下班卡'}\n時間：${mk.time}`);
 }
 async function rejectMakeup(id){
-  if(S.role!=='owner'){toast('只有老闆可拒絕補卡','err');return;}
-  if(!(await verifyActor(['owner']))) return;
+  if(!ROLES[S.role].canApproveMakeup){toast('只有老闆和行政主管可拒絕補卡','err');return;}
+  if(!(await verifyActor(['owner','admin']))) return;
+  const mkr=S.makeupRecords.find(m=>m.id===id);
+  if(S.role!=='owner' && mkr && mkr.empId===S.users[S.role].empId){toast('不能處理自己申請的補卡，請老闆處理','err');return;}
   try{
     const r=await api('PATCH','/api/makeups/'+id,{status:'rejected'});
     if(!r) throw new Error('後端無回應，狀態未更新');
@@ -2055,6 +2076,7 @@ async function rejectMakeup(id){
   syncTodayClockStatus();
   toast('已拒絕補卡','warn');
 }
+let mkSubmitting=false;
 async function submitMakeup(){
   const date=$('mkDate').value,type=$('mkType').value,time=$('mkTime').value,reason=$('mkReason').value.trim();
   if(!date||!time){toast('請填日期和時間','err');return;}
@@ -2074,10 +2096,15 @@ async function submitMakeup(){
     const used=S.makeupRecords.filter(m=>m.empId===u.empId&&(m.date||'').slice(0,7)===ym).length;
     if(used>=1){toast('本月已申請過補卡（每月限 1 次），請聯絡行政或老闆協助','err');return;}
   }
-  const saved=await api('POST','/api/makeups',{
-    emp_id:targetId, date, type, time,
-    shift_key:($('mkShift')?$('mkShift').value:null), reason
-  });
+  if(mkSubmitting) return; // 防連點：上一次送出還沒回應前，不重複送出
+  mkSubmitting=true;
+  let saved=null;
+  try{
+    saved=await api('POST','/api/makeups',{
+      emp_id:targetId, date, type, time,
+      shift_key:($('mkShift')?$('mkShift').value:null), reason
+    });
+  }finally{ mkSubmitting=false; }
   if(saved && saved.id){
     S.makeupRecords.unshift({id:saved.id,empId:targetId,date,type,time,reason,status:'pending'});
     renderMakeupList(); renderMyAttendance();
@@ -2904,6 +2931,7 @@ function calcMonthlyStats(empId, year, month){
   Object.entries(days).forEach(function(entry){
     const d=entry[0]; const v=entry[1];
     if(!v.in) return;
+    if(isNonWorkday(d)) return; // 週末／國定假日／停班日的打卡不計遲到
     if(isPrenatalExemptDay(empId,d)) return; // 產檢假半天不計入遲到／扣薪
     if(v.in>GRACE){
       const gh=9,gm=30,pts=v.in.split(':').map(Number);
@@ -2939,7 +2967,7 @@ function getPerfectAttendanceLists(year, month){
   const list900=[], list930=[];
   actEmps.forEach(function(e){
     const st = calcMonthlyStats(e.id, year, month);
-    const presentDays = Object.entries(st.days).filter(function(entry){ return entry[1].in; });
+    const presentDays = Object.entries(st.days).filter(function(entry){ return entry[1].in && !isNonWorkday(entry[0]); });
     if(!presentDays.length) return; // 整月沒打過卡，不列入全勤名單
     const hasSickOrPersonal = st.leaves.some(function(l){ return l.type==='sick' || l.type==='personal'; });
     if(hasSickOrPersonal) return;
@@ -3195,9 +3223,11 @@ function renderCheckinPage(){
     }
     const rows=[];
     filteredEmps.forEach(function(e){
+      const hire = e.hireDate ? String(e.hireDate).slice(0,10) : null;
       for(let d=1; d<=daysInMonth; d++){
         const ds = S_ckYear+'-'+String(S_ckMonth+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
         if(ds > todayStr) break; // 未來日期不顯示
+        if(hire && ds < hire) continue; // 到職日之前不顯示、不算缺卡
         const wd = new Date(ds).getDay();
         const v = (byEmpDay[e.id]||{})[ds];
         const leaveToday = S.leaveRecords.find(function(r){ return r.empId===e.id && r.status==='approved' && r.start<=ds && r.end>=ds; });
@@ -3559,7 +3589,9 @@ function toggleOtCaseInput(){
   if(!isCustom)$('otCaseName').value='';
 }
  
-function submitOvertime(){
+let otSubmitting=false;
+async function submitOvertime(){
+  if(otSubmitting) return;
   const date=$('otDate').value, hours=parseFloat($('otHours').value),
         start=$('otStart').value, end=$('otEnd').value,
         caseId=$('otCase').value, reason=$('otReason').value.trim();
@@ -3575,18 +3607,31 @@ function submitOvertime(){
   const CASES_MAP={daily:'🏢 公司日常',interior:'🛋️ 室內設計',graphic:'🎨 平面設計',visual:'👁️ 視覺設計',custom:'✏️ 其他'};
   const siteName=caseId==='custom'?customCase:CASES_MAP[caseId];
  
-  const newOt={
-    id:Date.now(), empId:u.empId, empName:u.name,
+  // 存到後端：必須等後端確認寫入成功（回傳含 id）才算送出，失敗要明確告知並保留表單內容。
+  // 時間欄位沒填時送 null（time 欄位不接受空字串 ''）
+  otSubmitting=true;
+  let saved=null;
+  try{
+    saved=await api('POST','/api/overtimes',{
+      emp_id:u.empId, emp_name:u.name, date,
+      site_name:siteName, start_time:start||null, end_time:end||null,
+      hours, reason
+    }, 60000); // 60 秒沒回應就取消等待
+  }finally{ otSubmitting=false; }
+  if(saved && saved.timeout){
+    console.error('加班申請逾時（60 秒）');
+    toast('⏳ 伺服器回應較慢，請稍後重新整理，到「我的加班紀錄」確認有沒有送出，確認沒有再重新送出','warn');
+    return;
+  }
+  if(!saved || !saved.id){
+    console.error('加班申請寫入失敗：', saved);
+    toast('❌ 加班申請送出失敗，沒有寫入資料庫，請稍後再試（表單內容已保留）','err');
+    return;
+  }
+  S.overtimes.unshift({
+    id:saved.id, empId:u.empId, empName:u.name,
     date, siteName, startTime:start, endTime:end,
-    hours, reason, status:'pending', createdAt:today()
-  };
-  S.overtimes.unshift(newOt);
- 
-  // 存到後端
-  api('POST','/api/overtimes',{
-    emp_id:u.empId, emp_name:u.name, date,
-    site_name:siteName, start_time:start, end_time:end,
-    hours, reason
+    hours, reason, status:saved.status||'pending', createdAt:saved.created_at||today()
   });
  
   // 清空表單
@@ -3621,7 +3666,7 @@ function renderOvertimePage(){
     </div>`).join(''):'<div class="empty">尚無加班紀錄</div>';
  
   // 加班核准目前只有老闆能做（approveOt 也是只認 canApproveLeave），這裡的顯示條件與其一致
-  if(role.canApproveLeave||role.canAdminReview){
+  if(role.canApproveLeave){
     $('allOtSection').style.display='block';
     const pending=S.overtimes.filter(o=>o.status==='pending');
     $('allOtList').innerHTML=pending.length?pending.map(o=>`
@@ -3647,15 +3692,17 @@ function renderOvertimePage(){
 async function approveOt(id){
   if(!ROLES[S.role].canApproveLeave){toast('只有老闆可核准','err');return;}
   if(!(await verifyActor('canApproveLeave'))) return;
+  const r=await api('PATCH','/api/overtimes/'+id,{status:'approved'});
+  if(!r || r.error){ console.error('加班核准寫入失敗：', r); toast('儲存失敗，狀態未更新，請重試','err'); return; }
   S.overtimes=S.overtimes.map(o=>o.id===id?Object.assign({},o,{status:'approved'}):o);
-  api('PATCH','/api/overtimes/'+id,{status:'approved'});
   renderOvertimePage();toast('✅ 加班已核准','ok');
 }
 async function rejectOt(id){
   if(!ROLES[S.role].canApproveLeave){toast('只有老闆可拒絕','err');return;}
   if(!(await verifyActor('canApproveLeave'))) return;
+  const r=await api('PATCH','/api/overtimes/'+id,{status:'rejected'});
+  if(!r || r.error){ console.error('加班拒絕寫入失敗：', r); toast('儲存失敗，狀態未更新，請重試','err'); return; }
   S.overtimes=S.overtimes.map(o=>o.id===id?Object.assign({},o,{status:'rejected'}):o);
-  api('PATCH','/api/overtimes/'+id,{status:'rejected'});
   renderOvertimePage();toast('已拒絕','warn');
 }
  
